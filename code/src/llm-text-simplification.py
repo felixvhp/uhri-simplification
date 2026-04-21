@@ -15,45 +15,81 @@ Requirements:
     Ollama python library https://github.com/ollama/ollama-python
 
 Input:
-    Original "legaleese" text, plus potentially some context.
+    A UHRI export file at DATA_PATH, loaded via src.Dataloader.load_records.
+
 Output:
-    Text translated to plain English.
+    Simplified text printed to stdout. Not persisted anywhere yet.
 
 Open issues:
     The code needs to be modularized and organized.
-    The model will need more context to perform better, eg what countries it is about, but this depends on the data format.
-        Pre-process the input data
+    Work more on pre-processing (adding context)
     Spending some time on choosing the best model might be wise.
+    Output persistence, right now we're just printing
 """
 
 import ollama
+from src.uhri_record import UHRIRecord
+from src.Dataloader import load_records
 
 # Note: I simply picked a model I allready had installed for demonstration purposes.
-MODEL = 'phi4' # Find others at: https://ollama.com/search
-SYSTEM_PROMPT = \
-"""
-Please summarise the following legal text into plain simple English.
-Be sure to use only information from the text.
-"""
+DATA_PATH = "../data/email_recs.xlsx"
+MODEL = 'llama3:latest' # Find others at: https://ollama.com/search
+SYSTEM_PROMPT = """\
+Simplify the following {type} from {body} regarding {country} into plain English that a \
+non-expert can understand. Preserve the meaning and any specific obligations or actions mentioned.
+Output ONLY the rewritten text. Do not include any preamble such as "Here is the rewritten/simplified text.
+ 
+Original text:
+{text}
+ 
+Simplified version:"""
 
-# Hardcoding this for now untill there is more clarity on the data format.
-test_text = """
-4.The Committee acknowledges the measures taken by the State Party in areas relevant to the Convention following the adoption of the Committee’s previous concluding observations, including:
+def build_prompt(record: UHRIRecord, template: str = SYSTEM_PROMPT) -> str:
+    """
+    Build a prompt from a record and a template.
 
-(a)The adoption of the Guidelines for the Search for Missing Persons, in July 2025;
+    Args:
+        record: The UHRIRecord to simplify.
+        template: Prompt template with {type}, {body}, {country}, {text} slots.
+                  Defaults to the module-level SYSTEM_PROMPT.
 
-(b)The adoption of the Judicial Reform Strategy 2024–2027;
+    Returns:
+        The fully-formatted prompt string, ready to send to the model.
+    """
+    return template.format(
+        type="recommendation" if record.is_recommendation else "observation",
+        body=record.recommending_body,
+        country=record.country,
+        text=record.text,
+    )
 
-(c)The adoption, by the Supreme State Prosecutor’s Office, of the 2024–2027 strategy for the investigation of war crimes, and the corresponding initial action plan for 2024–2025;
+def simplify(record: UHRIRecord, model: str = MODEL, template: str = SYSTEM_PROMPT) -> str:
+    """
+    Simplify a single UHRI record.
 
-(d)The amendment of the Criminal Code in 2023, ensuring the non-applicability of the statute of limitations to torture;
+    Builds the prompt with build_prompt() and sends it to the given model via
+    ollama.generate. No post-processing.
 
-(e)The amendments to the Law on the Judicial Council and Judges and the law on the State Prosecutor’s office to, inter alia, enhance the independence and accountability of judges and prosecutors.
-"""
+    Args:
+        record: The UHRIRecord to simplify.
+        model: Ollama model name (must already be pulled locally)
+        template: Prompt template passed through to build_prompt().
+                  Defaults to the module-level SYSTEM_PROMPT.
 
-# Defining the input data, for now just using the test_text
-input = test_text
-prompt = SYSTEM_PROMPT + input
-output = ollama.generate(model = MODEL, prompt= prompt)
-print(output['response'])
+    Returns:
+        The model's generated simplified text.
+    """
+    prompt = build_prompt(record, template)
+    response = ollama.generate(model=model, prompt=prompt)
+    return response["response"]
+
+records = load_records(DATA_PATH)
+ 
+# Test with first 3 records
+for record in records[:3]:
+    print(f"\n{'=' * 60}")
+    print(f"{record.recommending_body} to {record.country} [{record.type}]")
+    print(f"ORIGINAL: {record.text}")
+    print(f"\nSIMPLIFIED:")
+    print(simplify(record))
 
