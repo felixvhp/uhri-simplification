@@ -22,8 +22,9 @@ from pathlib import Path
 import json
 import pandas as pd
 from src.uhri_record import UHRIRecord
+from typing import Union
  
-def load_records(path: str | Path) -> list[UHRIRecord]:
+def load_records(path: Union[str,Path]) -> list[UHRIRecord]:
     """
     Load all records from an OHCHR export file.
 
