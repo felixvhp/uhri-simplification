@@ -1,41 +1,42 @@
 
 """
-Pkg 3: Natural language translation [last updated 2026-03-11]
+Pkg 3: Natural language translation [last updated 2026-05-14]
 
-The goal of this document is to test out using (local-)LLM's for simplifying the legalese texts.
+The goal of this document is to test out using LLMs for simplifying the legalese texts.
 Motivation:
-    Using Ollama allows different models to be used, and more up to date ones.
+    Using the Claude API allows access to frontier models without local hardware.
     Since presumably original text will always be provided also hallucinations should be less of an issue.
     Hallucinations also get reduced by the small context window, so no need for relying on background information.
     Enables easy tweaking of the "translation" through tweaking eg. the model or the system prompt.
 
 Requirements:
-    Ollama https://ollama.com/
-        Be sure to install the model under the MODEL variable also.
-    Ollama python library https://github.com/ollama/ollama-python
+    pip install anthropic python-dotenv
+    Set ANTHROPIC_API_KEY in a .env file at the repo root (see .env.example) or as a shell env var.
 
 Input:
     A UHRI export file at DATA_PATH, loaded via src.Dataloader.load_records.
 
 Output:
-    Simplified text printed to stdout. Not persisted anywhere yet.
+    Simplified text written to OUTPUT_PATH as CSV.
 
 Open issues:
     The code needs to be modularized and organized.
     Work more on pre-processing (adding context)
     Spending some time on choosing the best model might be wise.
-    Output persistence, right now we're just printing
 """
 
-import ollama
+import anthropic
+from dotenv import load_dotenv
 from src.uhri_record import UHRIRecord
 from src.Dataloader import load_records
 import csv
 
-# Note: I simply picked a model I allready had installed for demonstration purposes.
+load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
+
 DATA_PATH = "../data/email_recs.xlsx"
-MODEL = 'llama3:latest' # Find others at: https://ollama.com/search
+MODEL = "claude-haiku-4-5-20251001"  # fast + cheap; swap for claude-sonnet-4-6 for higher quality
 OUTPUT_PATH = "../data/simplification_results.csv"
+FULL_TESTS = False
 
 # =========== Prompts go here ============
 prompt_felix = """\
@@ -138,51 +139,68 @@ def simplify(record: UHRIRecord, model: str = MODEL, template: str = SYSTEM_PROM
     Simplify a single UHRI record.
 
     Builds the prompt with build_prompt() and sends it to the given model via
-    ollama.generate. No post-processing.
+    the Anthropic messages API. No post-processing.
 
     Args:
         record: The UHRIRecord to simplify.
-        model: Ollama model name (must already be pulled locally)
+        model: Claude model ID (e.g. "claude-haiku-4-5-20251001", "claude-sonnet-4-6")
         template: Prompt template passed through to build_prompt().
                   Defaults to the module-level SYSTEM_PROMPT.
 
     Returns:
-        The model's generated simplifiedtext.
+        The model's generated simplified text.
     """
     prompt = build_prompt(record, template)
-    response = ollama.generate(model=model, prompt=prompt)
-    return response["response"]
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from environment
+    response = client.messages.create(
+        model=model,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text
 
-# if __name__ == "__main__":
-records = load_records(DATA_PATH)
- 
-results_full = []
-# Test with first 3 records
-for record in records[:3]:
-    print(f"\n{'=' * 60}")
-    print(f"{record.recommending_body} to {record.country} [{record.type}]")
-    print(f"ORIGINAL: {record.text}")
+if __name__ == "__main__":
+    records = load_records(DATA_PATH)
 
-    results = {"original_text": record.text}
+    if not FULL_TESTS:
+        record = records[0]
+        print("\n Original:")
+        print(record.text)
+        print("\n Prompt:")
+        print(SYSTEM_PROMPT)
+        print("\n Conversion:")
+        print(simplify(record))
+    
+     
+    # Runs all the prompts on all the saved example items.
+    if FULL_TESTS:
+        results_full = []
+        # Test with first 3 records
+        for record in records[:3]:
+            print(f"\n{'=' * 60}")
+            print(f"{record.recommending_body} to {record.country} [{record.type}]")
+            print(f"ORIGINAL: {record.text}")
 
-    for name, text in prompt_dict.items():
-        print(f"\nSimplified with {name}:")
-        conversion = simplify(record, template = text)
-        print(conversion)
-        results[name] = conversion
+            results = {"original_text": record.text}
 
-    results_full.append(results)
+            for name, text in prompt_dict.items():
+                print(f"\nSimplified with {name}:")
+                conversion = simplify(record, template = text)
+                print(conversion)
+                results[name] = conversion
 
-# Write to CSV
-col_names = results_full[0].keys()
-with open(OUTPUT_PATH, "w", newline="", encoding="utf-8") as f:
-    writer = csv.DictWriter(f, fieldnames=col_names)
-    writer.writeheader()
+            results_full.append(results)
 
-    for row in results_full:
-        writer.writerow(row)
+        # Write to CSV
+        col_names = results_full[0].keys()
+        with open(OUTPUT_PATH, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=col_names)
+            writer.writeheader()
 
-print(f"Results saved to {OUTPUT_PATH}")
+            for row in results_full:
+                writer.writerow(row)
+
+        print(f"Results saved to {OUTPUT_PATH}")
 
 
     
