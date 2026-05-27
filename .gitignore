@@ -4,3 +4,10 @@ data/*
 !data/*.tar.gz
 !data/*.sh
 
+
+.DS_store
+
+# Secrets — never commit these
+.env
+*.env
+

@@ -1,0 +1,3 @@
+Run search with 
+
+python search.py "your query here" --print
