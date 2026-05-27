@@ -39,6 +39,7 @@ load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
 DATA_PATH = "../data/email_recs.xlsx"
 MODEL = "gpt-5.5" # Find others at: https://ollama.com/search
 OUTPUT_PATH = "../data/simplification_results3.csv"
+FULL_TESTS = False 
 openai_client = OpenAI() 
 
 # ================ End of test-prompt setup ================================
@@ -68,40 +69,48 @@ def simplify(record: UHRIRecord, model: str = MODEL, template: str = DEFAULT_PRO
 
 if __name__ == "__main__":
     records = load_records(DATA_PATH)
-    
-    results_full = []
-    for record in records:
-        print(f"\n{'=' * 60}")
-        print(f"{record.recommending_body} to {record.country} [{record.type}]")
-        print(f"ORIGINAL: {record.text}")
 
-        results = {"original_text": record.text}
-        orig_read = readability(record.text) 
+    if not FULL_TESTS:
+        record = records[0]
+        print("\n Original:")
+        print(record.text)
+        print("\n Prompt template:")
+        print(DEFAULT_PROMPT)
+        print("\n Conversion:")
+        print(simplify(record))
 
-        for name, text in PROMPTS.items():
-            print(f"\nSimplified with {name}:")
-            conversion = simplify(record, template = text)
-            print(conversion)
-            results[name] = conversion
+    else:
+        results_full = []
+        for record in records:
+            print(f"\n{'=' * 60}")
+            print(f"{record.recommending_body} to {record.country} [{record.type}]")
+            print(f"ORIGINAL: {record.text}")
 
-            metrics = score_simplification(record.text, conversion, orig_read)
-            for k, v in metrics.items():
-                results[f"{name}__{k}"] = v
-            
-            print(f"  -> eval: {metrics}")
+            results = {"original_text": record.text}
+            orig_read = readability(record.text) 
 
-        results_full.append(results)
+            for name, text in PROMPTS.items():
+                print(f"\nSimplified with {name}:")
+                conversion = simplify(record, template = text)
+                print(conversion)
+                results[name] = conversion
 
-    # Write to CSV
-    col_names = results_full[0].keys()
-    with open(OUTPUT_PATH, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=col_names)
-        writer.writeheader()
+                metrics = score_simplification(record.text, conversion, orig_read)
+                for k, v in metrics.items():
+                    results[f"{name}__{k}"] = v
+                
+                print(f"  -> eval: {metrics}")
 
-        for row in results_full:
-            writer.writerow(row)
+            results_full.append(results)
 
-    print(f"Results saved to {OUTPUT_PATH}")
-    
+        # Write to CSV
+        col_names = results_full[0].keys()
+        with open(OUTPUT_PATH, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=col_names)
+            writer.writeheader()
 
+            for row in results_full:
+                writer.writerow(row)
+
+        print(f"Results saved to {OUTPUT_PATH}")
 
