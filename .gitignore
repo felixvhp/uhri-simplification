@@ -11,3 +11,16 @@ data/*
 .env
 *.env
 
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+venv311/
+
+# Caches
+.pytest_cache/
+.mypy_cache/
