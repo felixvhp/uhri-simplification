@@ -15,6 +15,16 @@ uhri-dev/
 └── README.md            
 ```
 
+## Running Tests
+
+```bash
+cd code
+python -m pytest tests/
+# or run a single file directly:
+python tests/dataloader_test.py
+python tests/test-evaluations.py
+```
+
 ## Documentation Guidelines
 
 ### Code Files

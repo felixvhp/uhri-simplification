@@ -22,11 +22,13 @@ Resumption:
 """
  
 import json
- 
+from dotenv import load_dotenv 
 import anthropic
 import textstat
 from sentence_transformers import SentenceTransformer, util
 import re
+
+load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
  
 EVAL_MODEL = "claude-sonnet-4-5"
 eval_client = anthropic.Anthropic()
@@ -37,43 +39,35 @@ You are evaluating whether a simplified version of a UN human rights text is acc
  
 Carefully compare the original and simplified texts. Be strict: if anything important is missing, changed, or added incorrectly, mark as false.
  
-Original text:
+Original data:
 {original}
  
 Simplified text:
 {simplified}
  
-Evaluate on these five dimensions:
-1. content_preserved: Does the simplified text preserve ALL important obligations, actions, and decisions from the original?
-2. actors_preserved: Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed)?
-3. no_meaning_change: Does the simplified text avoid changing the meaning, strength, or conditions of the original (e.g. "must" vs "should", removing exceptions)?
-4. no_hallucination: Is the simplified text free of any new information, claims, or interpretations not present in the original?
-5. accessible_and_simple: Is the simplified text clearly easier to read and understandable to a non-expert, while still preserving the important meaning?
+Evaluate on these dimensions:
+{explanations}
  
 Respond with ONLY a JSON object in exactly this format, with no preamble, no markdown fences, no explanation outside the JSON:
  
 {{
-  "content_preserved": {{"score": true, "reason": "<one short sentence>"}},
-  "actors_preserved": {{"score": true, "reason": "<one short sentence>"}},
-  "no_meaning_change": {{"score": false, "reason": "<one short sentence>"}},
-  "no_hallucination": {{"score": true, "reason": "<one short sentence>"}},
-  "accessible_and_simple": {{"score": true, "reason": "<one short sentence>"}}
+    {eval_dimensions}
 }}
  
 The "score" field must be a JSON boolean (true or false), never a string. The "reason" field is one short sentence explaining the score.\
 """
  
-EVAL_DIMENSIONS = [
-    "content_preserved",
-    "actors_preserved",
-    "no_meaning_change",
-    "no_hallucination",
-    "accessible_and_simple",
-]
+EVAL_DIMENSIONS = {
+    "content_preserved": "Does the simplified text preserve ALL important obligations, actions, and decisions from the original?",
+    "actors_preserved": "Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed)?",
+    "no_meaning_change":  "Does the simplified text avoid changing the meaning, strength, or conditions of the original (e.g. 'must' vs 'should', removing exceptions)?",
+    "no_hallucination": "Is the simplified text free of any new information, claims, or interpretations not present in the original?",
+    "accessible_and_simple": "Is the simplified text clearly easier to read and understandable to a non-expert, while still preserving the important meaning?",
+}
  
  
 def evaluate(
-    original: str,
+    original,
     simplified: str,
     model: str = EVAL_MODEL,
 ) -> dict:
@@ -81,7 +75,7 @@ def evaluate(
     Evaluate a simplified text against its original on 5 dimensions.
  
     Args:
-        original: The original source text.
+        original: The original source text, and associated meta data.
         simplified: The simplified output to evaluate.
         model: Anthropic model name for the judge.
  
@@ -89,7 +83,8 @@ def evaluate(
         Dict keyed by dimension name. 
         Score conventions: 1 = yes/pass, 0 = no/fail, -1 = parse error.
     """
-    prompt = EVAL_PROMPT.format(original=original, simplified=simplified)
+
+    prompt = build_eval_prompt(original, simplified)
  
     response = eval_client.messages.create(
         model=model,
@@ -131,6 +126,43 @@ def evaluate(
         result[dim] = {"score": score_int, "reason": entry.get("reason", "reason missing")}
  
     return result
+
+def build_eval_prompt(
+    original: str,
+    simplified: str,
+):
+    """
+    Build the prompt for evaluating the query.
+    """
+    numerator = 1
+    formated_dim_explanations = ""
+    dim_explanations_template = "{num}. {dim}: {desc} \n"
+
+    
+    formated_eval_dimensions = ""
+    for dim, description in EVAL_DIMENSIONS.items():
+        # The explanation of each item.
+        explanation = dim_explanations_template.format(
+            num = numerator,
+            dim = dim,
+            desc = description
+        )
+        numerator += 1
+        formated_dim_explanations += explanation
+
+        # The json format template for the evaluation.
+        formated_eval = '"%s": : {"reason": "<one short sentence>", "score": true}, \n' % dim
+        formated_eval_dimensions += formated_eval
+
+
+    prompt = EVAL_PROMPT.format(original=original, 
+                                simplified=simplified, 
+                                explanations = formated_dim_explanations,
+                                eval_dimensions = formated_eval_dimensions
+                               )
+
+    return prompt
+
  
 
 def readability(text: str) -> dict[str, float]:
