@@ -96,13 +96,17 @@ def build_prompt_context():
     }
     
     # Test the build_eval_prompt() using the mock prompt and dimensions.
-    orig = "Test original text."
+    raw = {"Text": "Test original text.", 
+            "Body": "Trans European Signature Treaty",
+            "Country": "Switzerland",
+            }
     simp = "Test simplified text."
-    return prompt_mock, dimensions_mock, orig, simp
+    return prompt_mock, dimensions_mock, raw, simp
 
 def test_eval_prompt_gets_built_correctly():
-    prompt_mock, dimensions_mock, orig, simp = build_prompt_context()
+    prompt_mock, dimensions_mock, raw, simp = build_prompt_context()
 
+    orig = str(raw)
 
     # Testing with a mocked prompt
     with patch("src.evaluation.EVAL_PROMPT", prompt_mock), \
@@ -117,6 +121,8 @@ def test_eval_prompt_gets_built_correctly():
 def test_eval_prompt_works_correctly():
     prompt_mock, dimensions_mock, orig, simp = build_prompt_context()
 
+    orig = str(orig)
+
     # Testing with the real prompt
     with patch("src.evaluation.EVAL_DIMENSIONS", dimensions_mock):
         prompt = build_eval_prompt(orig, simp)
@@ -124,7 +130,9 @@ def test_eval_prompt_works_correctly():
     prompt_built_test(prompt, orig, simp, dimensions_mock)
 
 def test_eval_dims_work_correctly():
-    prompt_mock, dimensions_mock, orig, simp = build_prompt_context()
+    prompt_mock, dimensions_mock, raw, simp = build_prompt_context()
+
+    orig = str(raw)
 
     # Testing with the real prompt
     with patch("src.evaluation.EVAL_PROMPT", prompt_mock):

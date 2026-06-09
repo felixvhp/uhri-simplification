@@ -57,6 +57,9 @@ Respond with ONLY a JSON object in exactly this format, with no preamble, no mar
 The "score" field must be a JSON boolean (true or false), never a string. The "reason" field is one short sentence explaining the score.\
 """
  
+# Dictionary with:
+#   keys: the name of the dimension.
+#   values: the description of the dimension.
 EVAL_DIMENSIONS = {
     "content_preserved": "Does the simplified text preserve ALL important obligations, actions, and decisions from the original?",
     "actors_preserved": "Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed)?",
@@ -67,7 +70,7 @@ EVAL_DIMENSIONS = {
  
  
 def evaluate(
-    original,
+    raw_record,
     simplified: str,
     model: str = EVAL_MODEL,
 ) -> dict:
@@ -84,7 +87,7 @@ def evaluate(
         Score conventions: 1 = yes/pass, 0 = no/fail, -1 = parse error.
     """
 
-    prompt = build_eval_prompt(original, simplified)
+    prompt = build_eval_prompt(raw_record, simplified)
  
     response = eval_client.messages.create(
         model=model,
@@ -128,12 +131,18 @@ def evaluate(
     return result
 
 def build_eval_prompt(
-    original: str,
+    raw_record,
     simplified: str,
 ):
     """
     Build the prompt for evaluating the query.
+
+    params:
+        raw_record: the original record loaded from the database with all the context.
+        simplified: the simplified record.
     """
+    original = str(raw_record)
+    
     numerator = 1
     formated_dim_explanations = ""
     dim_explanations_template = "{num}. {dim}: {desc} \n"
@@ -182,7 +191,7 @@ def semantic_similarity(original: str, simplified: str) -> float:
  
  
 def score_simplification(
-    original: str,
+    raw_record,
     simplified: str,
     orig_readability: dict[str, float],
 ) -> dict:
@@ -201,7 +210,7 @@ def score_simplification(
         Flat dict of metrics
     """
     simp_read = readability(simplified)
-    scores = evaluate(original, simplified)
+    scores = evaluate(raw_record, simplified)
  
     out = {
         "fk_grade": simp_read["fk_grade"],

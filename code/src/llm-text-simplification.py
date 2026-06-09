@@ -39,7 +39,7 @@ load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
 DATA_PATH = "../data/email_recs.xlsx"
 MODEL = "gpt-5.5" # Find others at: https://ollama.com/search
 OUTPUT_PATH = "../data/simplification_results3.csv"
-FULL_TESTS = False 
+FULL_TESTS = True 
 openai_client = OpenAI() 
 
 # ================ End of test-prompt setup ================================
@@ -84,18 +84,19 @@ if __name__ == "__main__":
         for record in records:
             print(f"\n{'=' * 60}")
             print(f"{record.recommending_body} to {record.country} [{record.type}]")
-            print(f"ORIGINAL: {record.text}")
+            # print(f"ORIGINAL: {record.text}")
+
 
             results = {"original_text": record.text}
             orig_read = readability(record.text) 
 
             for name, text in PROMPTS.items():
-                print(f"\nSimplified with {name}:")
                 conversion = simplify(record, template = text)
-                print(conversion)
+                print(f"\nFinished Simplifying with {name}")
+                # print(conversion)
                 results[name] = conversion
 
-                metrics = score_simplification(record.text, conversion, orig_read)
+                metrics = score_simplification(record, conversion, orig_read)
                 for k, v in metrics.items():
                     results[f"{name}__{k}"] = v
                 
