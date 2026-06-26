@@ -22,17 +22,17 @@ Resumption:
 """
  
 import json
-from dotenv import load_dotenv 
+from functools import lru_cache
+from dotenv import load_dotenv
 import anthropic
 import textstat
-from sentence_transformers import SentenceTransformer, util
 import re
 
 load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
  
 EVAL_MODEL = "claude-sonnet-4-5"
 eval_client = anthropic.Anthropic()
-# embed_model = SentenceTransformer("all-MiniLM-L6-v2")  # for semantic similarity measurement
+# Semantic-similarity model is loaded lazily on first use (see semantic_similarity).
  
 EVAL_PROMPT = """\
 You are evaluating whether a simplified version of a UN human rights text is accurate and accessible.
@@ -160,7 +160,7 @@ def build_eval_prompt(
         formated_dim_explanations += explanation
 
         # The json format template for the evaluation.
-        formated_eval = '"%s": : {"reason": "<one short sentence>", "score": true}, \n' % dim
+        formated_eval = '"%s": {"reason": "<one short sentence>", "score": true}, \n' % dim
         formated_eval_dimensions += formated_eval
 
 
@@ -184,9 +184,17 @@ def readability(text: str) -> dict[str, float]:
         "fk_ease": textstat.flesch_reading_ease(text),
     }
  
+@lru_cache(maxsize=1)
+def _embedder():
+    """Build the sentence-transformer once, on first use, then reuse it."""
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
 def semantic_similarity(original: str, simplified: str) -> float:
     """Cosine similarity between sentence-transformer embeddings"""
-    embeddings = embed_model.encode([original, simplified])
+    from sentence_transformers import util
+    embeddings = _embedder().encode([original, simplified])
     return float(util.cos_sim(embeddings[0], embeddings[1]))
  
  
@@ -221,6 +229,25 @@ def score_simplification(
     for dim, entry in scores.items():
         out[f"{dim}__score"] = entry["score"]
         out[f"{dim}__reason"] = entry["reason"]
- 
+
     return out
- 
+
+
+def add_fk_normalized_score(rows, src="fk_grade_delta", dst="fk_normalized_score"):
+    """
+    Min-max normalise the Flesch-Kincaid grade delta into a [0, 1] score.
+
+    Operates across the whole batch of rows, so the result depends on the set
+    passed in. If every row has the same delta (no spread), the score is 0.
+    """
+    values = [r[src] for r in rows if isinstance(r.get(src), (int, float))]
+    if not values:
+        return rows
+
+    lo, hi = min(values), max(values)
+    span = hi - lo
+    for r in rows:
+        v = r.get(src)
+        r[dst] = (v - lo) / span if span else 0.0
+    return rows
+

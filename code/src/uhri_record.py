@@ -18,7 +18,7 @@ Open Issues:
 Resumption:
     If you add fields, update Dataloader.load_records too.
     If you're converting any field to an enum, grep for the string literals in
-    llm-text-simplification.py before renaming anything.
+    simplification.py before renaming anything.
 """
 
 from dataclasses import dataclass
