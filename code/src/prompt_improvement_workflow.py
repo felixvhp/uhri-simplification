@@ -49,8 +49,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from typing import Dict, List, Optional
 
 import pandas as pd
-from src.prompts import PROMPTS
-from src.evaluation import EVAL_DIMENSIONS
 
 # Tuneable thresholds ─────────────────────────────────────────────────────────
 # Variance below this flags a metric as nearly constant → poor discriminator.
@@ -416,8 +414,6 @@ if __name__ == "__main__":
     # TODO: get the data for a random subset of items for each loop
 
     # Step 1: Load and clean data ────────────────────────────────────────────────
-    prompt_names = PROMPTS.keys()
-    metrics = EVAL_DIMENSIONS.keys()
     df = pd.read_csv(DATA_PATH)
 
     df = normalise_fk_grade(df)
