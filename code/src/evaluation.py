@@ -35,22 +35,25 @@ Resumption:
     the same judge machinery and never drift apart.
 
     load_all_metric_definitions()/load_custom_metric_definitions()/
-    save_custom_metric_definition()/save_custom_metric_scores_to_csv()
-    (added 2026-09-13, reshaped into one unified metrics.json 2026-09-18)
-    let the GUI persist a custom metric permanently instead of it living
-    only in st.session_state: the definition (name + judge question +
-    date_added) is merged into metrics.json alongside the standard 5 —
-    save_custom_metric_definition() always reads and rewrites the *whole*
-    file, never just the custom subset, so saving a new custom metric can
-    never accidentally drop the standard ones. The computed scores/reasons
-    go into the data CSV instead (data/ is gitignored, so that part stays
-    local). Once saved, the metric is just an ordinary CSV column on the
-    next load; nothing special treats it as "custom" anymore.
+    save_custom_metric_definition() (added 2026-09-13, reshaped into one
+    unified metrics.json 2026-09-18, delegated to the shared
+    DefinitionsStore 2026-09-18) let the GUI persist a custom metric
+    permanently instead of it living only in st.session_state: the
+    definition (name + judge question + date_added) is merged into
+    metrics.json alongside the standard 5 — save_custom_metric_definition()
+    always reads and rewrites the *whole* file, never just the custom
+    subset, so saving a new custom metric can never accidentally drop the
+    standard ones (see definitions_store.py for the shared implementation;
+    prompts.py's equivalent trio for prompts.json uses the exact same
+    class). save_custom_metric_scores_to_csv() persists the computed
+    scores/reasons themselves, into the data CSV instead (data/ is
+    gitignored, so that part stays local). Once saved, the metric is just
+    an ordinary CSV column on the next load; nothing special treats it as
+    "custom" anymore.
 """
 
 import json
 import re
-from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -59,6 +62,7 @@ from dotenv import load_dotenv
 import anthropic
 import textstat
 
+from src.definitions_store import DefinitionsStore
 from src.text_utils import slugify
 
 # Where ALL metric definitions live — the 5 standard ones and any custom
@@ -67,28 +71,19 @@ from src.text_utils import slugify
 # the repo. The *scores* for a custom metric go into the data CSV instead
 # (data/ is gitignored — see save_custom_metric_scores_to_csv()), since
 # those are per-dataset, not source.
-# TODO: Define this more centrally somewhere 
 METRICS_PATH = Path(__file__).parent / "metrics.json"
+_metrics_store = DefinitionsStore(METRICS_PATH, content_field="description")
 
 
 def load_all_metric_definitions(path: Optional[Path] = None) -> dict:
     """Load every metric definition — standard AND custom, together.
 
-    Args:
-        path: JSON file to read. Defaults to METRICS_PATH — read at call
-            time (not bound as the parameter default) so tests can
-            monkeypatch that module constant to a tmp_path file and never
-            touch the real one.
-
-    Returns:
-        Dict of slug -> {"name", "description", "standard", "date_added"}.
-        Empty dict if the file doesn't exist yet.
+    See DefinitionsStore.load_all() for the full contract; this is a thin
+    wrapper so callers keep using `from src.evaluation import
+    load_all_metric_definitions` rather than reaching into the store
+    directly.
     """
-    path = path or METRICS_PATH
-    if not Path(path).exists():
-        return {}
-    with open(path) as f:
-        return json.load(f)
+    return _metrics_store.load_all(path)
 
 
 load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
@@ -304,20 +299,9 @@ def load_custom_metric_definitions(path: Optional[Path] = None) -> dict:
     "Custom" means anything in metrics.json *not* marked `standard: true` —
     i.e. whatever's been added via the GUI's "Add a new metric" form. Use
     load_all_metric_definitions() instead if you need the standard ones too.
-
-    Args:
-        path: JSON file to read. Defaults to METRICS_PATH — read at call
-            time, same reasoning as load_all_metric_definitions().
-
-    Returns:
-        Dict of slug -> {"name", "description", "standard": False,
-        "date_added"}. Empty dict if none saved (or the file doesn't exist).
+    See DefinitionsStore.load_custom() for the full contract.
     """
-    return {
-        slug: entry
-        for slug, entry in load_all_metric_definitions(path).items()
-        if not entry.get("standard")
-    }
+    return _metrics_store.load_custom(path)
 
 
 def save_custom_metric_definition(
@@ -329,35 +313,19 @@ def save_custom_metric_definition(
 ) -> None:
     """Persist one custom metric's definition (name + judge question).
 
-    Reads and rewrites the *entire* metrics.json (via
-    load_all_metric_definitions(), not load_custom_metric_definitions()) so
-    saving a new custom metric can never accidentally drop the standard 5
-    that live in the same file — read-modify-write, keyed by slug (re-saving
-    the same slug overwrites just that entry, including its date_added — a
-    re-save is treated as "still current", not backdated to when it was
-    first added).
+    See DefinitionsStore.save_custom() for the full contract, in particular
+    why this can never accidentally drop the standard 5 sharing the file.
 
     Args:
         slug: The metric's column-prefix slug (see text_utils.slugify).
         name: Human-readable name, as typed in the GUI.
         description: The judge question.
-        path: JSON file to write. Defaults to METRICS_PATH — read at call
-            time, same reasoning as load_all_metric_definitions().
+        path: JSON file to write. Defaults to METRICS_PATH.
         date_added: ISO date string (YYYY-MM-DD). Defaults to today — the
             normal case, a fresh save from the GUI. Pass this explicitly
             only to backfill an older entry.
     """
-    path = path or METRICS_PATH
-    definitions = load_all_metric_definitions(path)
-    definitions[slug] = {
-        "name": name,
-        "description": description,
-        "standard": False,
-        "date_added": date_added or date.today().isoformat(),
-    }
-    with open(path, "w") as f:
-        json.dump(definitions, f, indent=2, sort_keys=True)
-        f.write("\n")
+    _metrics_store.save_custom(slug, name, description, path, date_added)
 
 
 def save_custom_metric_scores_to_csv(csv_path: str, slug: str, scores: list, reasons: list) -> None:
