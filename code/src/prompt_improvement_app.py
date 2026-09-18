@@ -448,27 +448,53 @@ def _render_save_metrics_section(data_path: str, base_n_rows: int) -> None:
             st.rerun()
 
 
-def _render_metric_descriptions(active_metrics: list, metric_descriptions: dict, metric_dates: dict) -> None:
-    """Let the user look up a metric's judge question / explanation, and when it was added.
+def _render_definition_viewer(
+    active_items: list,
+    contents: dict,
+    dates: dict,
+    *,
+    kind: str,
+    expander_title: str,
+    selectbox_label: str,
+    not_available: str,
+    as_code: bool = False,
+) -> None:
+    """Let the user look up an item's stored content, and when it was added.
 
-    Pure inspection — makes it easier to decide how to weight or whether to
-    remove a metric without having to go read evaluation.py. Covers the
-    standard EVAL_DIMENSIONS, the static fk_normalized_score blurb, and any
-    custom metric's stored judge question — all loaded from the one unified
-    metrics.json (see evaluation.load_all_metric_definitions()) — keyed the
-    same as `active_metrics` (full ``*_score`` column names) so a lookup
-    never mismatches. `metric_dates` is best-effort — fk_normalized_score,
-    the standard 5 (date_added: null in metrics.json), and an unsaved
-    this-session custom metric all have no date to show, so the caption is
-    just omitted for those.
+    Shared by the "View metric description" / "View prompt template" panels
+    — pure inspection, makes it easier to decide how to weight/remove a
+    metric or compare/draft a prompt without going to read evaluation.py /
+    prompts.py directly. `contents`/`dates` are keyed the same way as
+    `active_items` (full ``*_score`` column names for metrics, prompt
+    values for prompts) so a lookup never mismatches.
+
+    `dates` is best-effort: a computed-not-judged metric (fk_normalized_score),
+    a standard metric/prompt (date_added: null in metrics.json/prompts.json),
+    or an unsaved this-session custom item all have no date to show, so the
+    caption is just omitted for those.
+
+    Args:
+        active_items: The currently-active metrics or prompts to choose from.
+        contents: slug/prompt -> description or template text.
+        dates: slug/prompt -> ISO date string, only for entries that have one.
+        kind: "metric" or "prompt" — used for the selectbox's session_state key.
+        expander_title: e.g. "📋 View metric description".
+        selectbox_label: e.g. "Metric".
+        not_available: Fallback text when `chosen` isn't in `contents`.
+        as_code: Render the content with st.code() (for a prompt template)
+            instead of st.write() (for a metric's plain-text description).
     """
-    if not active_metrics:
+    if not active_items:
         return
-    with st.expander("📋 View metric description"):
-        chosen = st.selectbox("Metric", active_metrics, key="view_metric_select")
-        st.write(metric_descriptions.get(chosen, "_No description available for this metric._"))
-        if chosen in metric_dates:
-            st.caption(f"Added: {metric_dates[chosen]}")
+    with st.expander(expander_title):
+        chosen = st.selectbox(selectbox_label, active_items, key=f"view_{kind}_select")
+        content = contents.get(chosen, not_available)
+        if as_code:
+            st.code(content, language=None)
+        else:
+            st.write(content)
+        if chosen in dates:
+            st.caption(f"Added: {dates[chosen]}")
 
 
 # ── Prompt management: remove (active-prompt toggle), add (live LLM) ────────
@@ -642,22 +668,6 @@ def _render_save_prompts_section(data_path: str, base_n_rows: int) -> None:
             st.rerun()
 
 
-def _render_prompt_templates(active_prompts: list, prompt_templates: dict, prompt_dates: dict) -> None:
-    """Let the user look up a prompt's actual template text, and when it was added.
-
-    Pure inspection — makes it easier to compare prompts, spot why one might
-    be scoring differently, or draft a new one, without opening prompts.py.
-    Covers the standard 5 templates plus any custom prompt's stored template
-    (see src/prompts.py's prompts.json). `prompt_dates` is best-effort — the
-    standard 5 have no date_added, so the caption is just omitted for those.
-    """
-    if not active_prompts:
-        return
-    with st.expander("📋 View prompt template"):
-        chosen = st.selectbox("Prompt", active_prompts, key="view_prompt_select")
-        st.code(prompt_templates.get(chosen, "No template available for this prompt."), language=None)
-        if chosen in prompt_dates:
-            st.caption(f"Added: {prompt_dates[chosen]}")
 
 
 # Static fallback explanations for metrics that have no per-row `_reason`
@@ -1004,7 +1014,11 @@ def main() -> None:
         _render_add_metric_form(df, data_path, mtime)
         _render_save_metrics_section(data_path, base_n_rows)
         _render_clear_button("custom_metrics", "custom metrics")
-        _render_metric_descriptions(active_metrics, metric_descriptions, metric_dates)
+        _render_definition_viewer(
+            active_metrics, metric_descriptions, metric_dates,
+            kind="metric", expander_title="📋 View metric description", selectbox_label="Metric",
+            not_available="_No description available for this metric._",
+        )
 
         st.caption("Higher weight = more influence on a prompt's average score.")
         saved_weights = saved_settings.get("weights", {})
@@ -1024,7 +1038,11 @@ def main() -> None:
         _render_add_prompt_form(df, data_path, mtime, base_n_rows)
         _render_save_prompts_section(data_path, base_n_rows)
         _render_clear_button("custom_prompts", "added prompts")
-        _render_prompt_templates(active_prompts, prompt_templates, prompt_dates)
+        _render_definition_viewer(
+            active_prompts, prompt_templates, prompt_dates,
+            kind="prompt", expander_title="📋 View prompt template", selectbox_label="Prompt",
+            not_available="No template available for this prompt.", as_code=True,
+        )
 
         # Acted on here (not right where the button rendered, up top) because
         # weights/active_prompts don't exist yet that early in the script.
