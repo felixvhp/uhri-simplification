@@ -439,22 +439,3 @@ def score_simplification(
 
     return out
 
-
-def add_fk_normalized_score(rows, src="fk_grade_delta", dst="fk_normalized_score"):
-    """
-    Min-max normalise the Flesch-Kincaid grade delta into a [0, 1] score.
-
-    Operates across the whole batch of rows, so the result depends on the set
-    passed in. If every row has the same delta (no spread), the score is 0.
-    """
-    values = [r[src] for r in rows if isinstance(r.get(src), (int, float))]
-    if not values:
-        return rows
-
-    lo, hi = min(values), max(values)
-    span = hi - lo
-    for r in rows:
-        v = r.get(src)
-        r[dst] = (v - lo) / span if span else 0.0
-    return rows
-

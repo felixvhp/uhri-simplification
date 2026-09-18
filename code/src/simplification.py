@@ -38,7 +38,6 @@ Resumption:
     definition/scores are split across evaluation.py's two save functions.
 """
 
-import csv
 import random
 
 import pandas as pd
@@ -46,7 +45,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from src.Dataloader import load_records
-from src.evaluation import add_fk_normalized_score, readability, score_simplification
+from src.evaluation import readability, score_simplification
 from src.prompt_improvement_workflow import normalise_fk_grade
 from src.prompts import PROMPTS, DEFAULT_PROMPT, build_prompt
 from src.text_utils import slugify
@@ -292,14 +291,15 @@ if __name__ == "__main__":
               f"across {len(PROMPTS)} prompts.")
 
         rows = run_experiment(sample)
-        rows = add_fk_normalized_score(rows)
-
-        # one row per (text, prompt), each metric its own column.
-        col_names = list(rows[0].keys())
-        with open(OUTPUT_PATH, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=col_names)
-            writer.writeheader()
-            writer.writerows(rows)
+        # One row per (text, prompt), each metric its own column. Same
+        # normalise_fk_grade() used everywhere else in pkg3 (the GUI,
+        # prompt_improvement_workflow.py, generate_new_prompt() above) —
+        # there used to be a separate add_fk_normalized_score() here doing
+        # the identical min-max math on a list of dicts instead of a
+        # DataFrame; building the DataFrame a few lines earlier instead
+        # removed that duplicate.
+        df = normalise_fk_grade(pd.DataFrame(rows))
+        df.to_csv(OUTPUT_PATH, index=False)
 
         print(f"Results saved to {OUTPUT_PATH}")
 
