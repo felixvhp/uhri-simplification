@@ -1,0 +1,44 @@
+{
+  "absolute_accessible": {
+    "date_added": "2026-09-13",
+    "description": "Is the simplified text easy to read and understand for a lay-person and do all (sub-)parts of the text make sense on their own (paragraphs, sentences)?\n",
+    "name": "absolute_accessible",
+    "standard": false
+  },
+  "accessible_and_simple": {
+    "date_added": null,
+    "description": "Is the simplified text clearly easier to read and understandable to a non-expert, while still preserving the important meaning?",
+    "name": "accessible_and_simple",
+    "standard": true
+  },
+  "actors_preserved": {
+    "date_added": null,
+    "description": "Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed)?",
+    "name": "actors_preserved",
+    "standard": true
+  },
+  "actors_with_context": {
+    "date_added": "2026-09-13",
+    "description": "Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed, allowing for the addition of actors from the context)?",
+    "name": "actors_with_context",
+    "standard": false
+  },
+  "content_preserved": {
+    "date_added": null,
+    "description": "Does the simplified text preserve ALL important obligations, actions, and decisions from the original?",
+    "name": "content_preserved",
+    "standard": true
+  },
+  "no_hallucination": {
+    "date_added": null,
+    "description": "Is the simplified text free of any new information, claims, or interpretations not present in the original?",
+    "name": "no_hallucination",
+    "standard": true
+  },
+  "no_meaning_change": {
+    "date_added": null,
+    "description": "Does the simplified text avoid changing the meaning, strength, or conditions of the original (e.g. 'must' vs 'should', removing exceptions)?",
+    "name": "no_meaning_change",
+    "standard": true
+  }
+}

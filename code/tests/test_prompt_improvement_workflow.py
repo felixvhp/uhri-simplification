@@ -11,6 +11,7 @@ from src.prompt_improvement_workflow import (
     normalise_fk_grade,
     compute_weighted_average,
     compare_prompts,
+    get_high_variance_samples,
 )
 
 
@@ -66,6 +67,14 @@ def test_normalise_fk_grade_max_is_one():
 def test_normalise_fk_grade_midpoint():
     df = pd.DataFrame({"fk_grade_delta": [0.0, 5.0, 10.0]})
     assert normalise_fk_grade(df)["fk_normalized_score"].iloc[1] == pytest.approx(0.5)
+
+
+def test_normalise_fk_grade_no_spread_is_zero_not_nan():
+    # Every delta equal -> nothing to normalise against. The naive min-max
+    # formula divides by zero here; must come back as 0.0, not NaN/inf.
+    df = pd.DataFrame({"fk_grade_delta": [3.0, 3.0, 3.0]})
+    result = normalise_fk_grade(df)["fk_normalized_score"]
+    assert (result == 0.0).all()
 
 
 # ── compute_weighted_average ──────────────────────────────────────────────────
@@ -129,6 +138,22 @@ def test_single_score_column_returns_that_value():
     assert result["average_score"].iloc[0] == pytest.approx(0.7)
 
 
+def test_nan_metric_is_excluded_from_that_rows_average_not_treated_as_zero():
+    # A row missing one metric (e.g. a custom metric never scored for a
+    # prompt added later) should average over what it does have, not have
+    # the missing metric's weight silently deflate the result.
+    df = pd.DataFrame({"a_score": [1.0, 1.0], "b_score": [1.0, float("nan")]})
+    result = compute_weighted_average(df, ["a_score", "b_score"])
+    assert result["average_score"].iloc[0] == pytest.approx(1.0)  # (1+1)/2
+    assert result["average_score"].iloc[1] == pytest.approx(1.0)  # 1/1, not (1+0)/2=0.5
+
+
+def test_all_metrics_nan_gives_nan_average():
+    df = pd.DataFrame({"a_score": [float("nan")], "b_score": [float("nan")]})
+    result = compute_weighted_average(df, ["a_score", "b_score"])
+    assert pd.isna(result["average_score"].iloc[0])
+
+
 # ── compare_prompts ───────────────────────────────────────────────────────────
 
 
@@ -154,6 +179,79 @@ def test_compare_prompts_returns_variance(capsys):
     assert stats.loc["B", "variance"] > 0
 
 
+def test_compare_prompts_single_sample_group_variance_is_zero_not_nan():
+    # A prompt evaluated on only one text has an undefined sample variance
+    # (pandas .var() gives NaN for n=1) — this must come back as 0.0, not NaN,
+    # so it doesn't trip high_variance or poison downstream comparisons.
+    df = _prompt_df([0.9], [0.5, 0.6])
+    stats = compare_prompts(df)
+    assert stats.loc["A", "variance"] == pytest.approx(0.0)
+    assert stats.loc["A", "high_variance"] == False  # noqa: E712
+
+
+def test_compare_prompts_flags_high_variance_prompts():
+    df = _prompt_df([0.5, 0.5], [0.0, 1.0])  # B: variance 0.5, well above default threshold
+    stats = compare_prompts(df)
+    assert stats.loc["A", "high_variance"] == False  # noqa: E712
+    assert stats.loc["B", "high_variance"] == True  # noqa: E712
+
+
+def test_compare_prompts_high_var_threshold_is_tunable():
+    df = _prompt_df([0.5, 0.5], [0.4, 0.6])  # B: variance 0.02
+    loose = compare_prompts(df, high_var_threshold=0.5, verbose=False)
+    strict = compare_prompts(df, high_var_threshold=0.01, verbose=False)
+    assert loose.loc["B", "high_variance"] == False  # noqa: E712
+    assert strict.loc["B", "high_variance"] == True  # noqa: E712
+
+
+def test_compare_prompts_verbose_false_prints_nothing(capsys):
+    df = _prompt_df([0.5, 0.5], [0.0, 1.0])
+    compare_prompts(df, verbose=False)
+    assert capsys.readouterr().out == ""
+
+
+def test_compare_prompts_verbose_true_prints_report_and_samples(capsys):
+    df = pd.DataFrame(
+        {
+            "prompt": ["A", "A", "B", "B"],
+            "average_score": [0.5, 0.5, 0.0, 1.0],
+            "original_text": ["orig1", "orig2", "orig3", "orig4"],
+            "transcribed_text": ["t1", "t2", "t3", "t4"],
+        }
+    )
+    compare_prompts(df, score_columns=[])
+    out = capsys.readouterr().out
+    assert "Prompt comparison" in out
+    assert "HIGH VARIANCE" in out
+    assert "'B' has high variance" in out
+
+
+# ── get_high_variance_samples ─────────────────────────────────────────────────
+
+
+def test_get_high_variance_samples_only_returns_flagged_prompts():
+    df = pd.DataFrame(
+        {
+            "prompt": ["A", "A", "B", "B"],
+            "average_score": [0.5, 0.5, 0.0, 1.0],
+            "original_text": ["orig1", "orig2", "orig3", "orig4"],
+            "transcribed_text": ["t1", "t2", "t3", "t4"],
+        }
+    )
+    stats = compare_prompts(df, verbose=False)
+    samples = get_high_variance_samples(df, stats, score_columns=[])
+    assert set(samples.keys()) == {"B"}
+    assert (samples["B"]["prompt"] == "B").all()
+
+
+def test_get_high_variance_samples_empty_when_none_flagged():
+    df = _prompt_df([0.5, 0.5], [0.5, 0.5])
+    stats = compare_prompts(df, verbose=False)
+    df_full = df.assign(original_text="x", transcribed_text="y")
+    samples = get_high_variance_samples(df_full, stats, score_columns=[])
+    assert samples == {}
+
+
 if __name__ == "__main__":
     tests = [
         test_get_score_columns_picks_up_score_cols,
@@ -162,6 +260,7 @@ if __name__ == "__main__":
         test_normalise_fk_grade_min_is_zero,
         test_normalise_fk_grade_max_is_one,
         test_normalise_fk_grade_midpoint,
+        test_normalise_fk_grade_no_spread_is_zero_not_nan,
         test_equal_weights_is_arithmetic_mean,
         test_none_weights_defaults_to_equal,
         test_custom_weights_change_the_average,
@@ -171,9 +270,18 @@ if __name__ == "__main__":
         test_all_ones_give_one_average_regardless_of_weights,
         test_multiple_rows_are_computed_independently,
         test_single_score_column_returns_that_value,
+        test_nan_metric_is_excluded_from_that_rows_average_not_treated_as_zero,
+        test_all_metrics_nan_gives_nan_average,
         test_compare_prompts_ranks_by_mean,
         test_compare_prompts_mean_values_are_correct,
         test_compare_prompts_returns_variance,
+        test_compare_prompts_single_sample_group_variance_is_zero_not_nan,
+        test_compare_prompts_flags_high_variance_prompts,
+        test_compare_prompts_high_var_threshold_is_tunable,
+        test_compare_prompts_verbose_false_prints_nothing,
+        test_compare_prompts_verbose_true_prints_report_and_samples,
+        test_get_high_variance_samples_only_returns_flagged_prompts,
+        test_get_high_variance_samples_empty_when_none_flagged,
     ]
     for t in tests:
         try:

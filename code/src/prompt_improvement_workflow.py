@@ -1,5 +1,5 @@
 """
-Pkg 3: Prompt improvement workflow [last updated 2026-06-19]
+Pkg 3: Prompt improvement workflow [last updated 2026-09-13]
 
 Usage:
     cd code
@@ -9,11 +9,23 @@ Usage:
     unpivoting simplification_results.csv — see analyse_simplification.ipynb)
     and prints a four-step evaluation report to stdout.
 
+    A Streamlit GUI over the same functions lives at src/prompt_improvement_app.py:
+        streamlit run src/prompt_improvement_app.py
+
 Reads a long-format CSV and runs a four-step evaluation workflow:
     1. Load and score: normalise FK-grade delta, compute weighted average.
     2. Metric variance check: flag low-variance metrics (poor discriminators).
     3. Prompt comparison: rank prompts by mean score, flag high-variance ones.
     4. Best-prompt verification: show sample outputs for manual inspection.
+
+Design note — compute/display split:
+    Every step function (check_metric_variance, show_sanity_samples,
+    compare_prompts, verify_best_prompt) takes a ``verbose`` flag. Default
+    True prints exactly like the original CLI. A caller that wants to render
+    results itself (the Streamlit app, a notebook, a future dashboard) passes
+    verbose=False and gets the same computation back as plain DataFrames/dicts
+    instead of stdout text — so new front ends can be added without touching
+    this module's logic.
 
 Open Issues:
     - FK normalisation uses the dataset's own min/max, so the scale shifts
@@ -21,7 +33,8 @@ Open Issues:
     - Weights are hand-tuned; no principled calibration yet.
 
 Resumption:
-    - Tweak WEIGHTS in __main__, re-run, read the verify-best-prompt output.
+    - Tweak WEIGHTS in __main__ (or the GUI sidebar), re-run, read the
+      verify-best-prompt output.
     - Add new metrics to the CSV and they will be picked up automatically.
 """
 
@@ -33,7 +46,7 @@ from pathlib import Path
 # imports in this file and its dependencies (prompts.py, evaluation.py) resolve.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import pandas as pd
 from src.prompts import PROMPTS
@@ -79,9 +92,12 @@ def normalise_fk_grade(df: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         df with ``fk_normalized_score`` added (modifies in place and returns).
+        Every row gets 0.0 if every delta is equal (no spread to normalise
+        against — the naive formula would otherwise divide by zero).
     """
     lo, hi = df["fk_grade_delta"].min(), df["fk_grade_delta"].max()
-    df["fk_normalized_score"] = (df["fk_grade_delta"] - lo) / (hi - lo)
+    span = hi - lo
+    df["fk_normalized_score"] = (df["fk_grade_delta"] - lo) / span if span else 0.0
     return df
 
 
@@ -92,19 +108,31 @@ def compute_weighted_average(
 ) -> pd.DataFrame:
     """Compute a weighted mean over score columns and store it as ``average_score``.
 
+    NaN-safe per row: a row missing one metric (e.g. a custom metric that was
+    never scored for a prompt added later — see generate_new_prompt() in
+    simplification.py) has that metric's weight excluded from *its own* row's
+    denominator too, not just its numerator. Averaging over the remaining
+    metrics is what a reader expects from "missing data"; silently treating a
+    missing score as 0 while still charging its weight would deflate that
+    row's average for no real reason.
+
     Args:
-        df: Long-format DataFrame with all ``score_columns`` present.
+        df: Long-format DataFrame with all ``score_columns`` present (any
+            individual cell may be NaN).
         score_columns: Column names to include in the average.
         weights: Optional mapping of column name to weight. Columns not in the
                  dict default to 1.0. Pass ``None`` for equal weights.
 
     Returns:
-        df with ``average_score`` added or updated (modifies in place and returns).
+        df with ``average_score`` added or updated (modifies in place and
+        returns). NaN for a row where every metric is missing.
     """
     if weights is None:
         weights = {}
     w = pd.Series({col: weights.get(col, 1.0) for col in score_columns})
-    df["average_score"] = df[score_columns].mul(w).sum(axis=1) / w.sum()
+    weighted_sum = df[score_columns].mul(w).sum(axis=1)
+    applicable_weight = df[score_columns].notna().mul(w).sum(axis=1)
+    df["average_score"] = weighted_sum / applicable_weight
     return df
 
 
@@ -116,92 +144,167 @@ def check_metric_variance(
     score_columns: List[str],
     threshold: float = LOW_VARIANCE_THRESHOLD,
     n_samples: int = N_SAMPLES,
-) -> None:
-    """Print a variance report for each metric and inspect low-variance ones.
+    verbose: bool = True,
+) -> Dict[str, object]:
+    """Compute a variance report for each metric and sample the low-variance ones.
 
     A metric with low variance assigns nearly the same score to every output.
     It contributes little signal to the ranking and is a candidate for removal.
-    For each flagged metric, sample rows are printed so the user can read the
+    For each flagged metric, sample rows are pulled so a caller can read the
     LLM's reasoning and decide whether the metric is worth keeping.
 
     Args:
         df: Long-format DataFrame with score and optional ``*_reason`` columns.
         score_columns: Metric score column names to evaluate.
         threshold: Variance below this triggers a LOW warning.
-        n_samples: Number of sample rows to show per flagged metric.
+        n_samples: Number of sample rows to gather per flagged metric.
+        verbose: If True (default), print the report as before. Set to False
+            to compute silently, e.g. for a GUI that renders the result itself.
+
+    Returns:
+        Dict with keys ``variances`` (Series, ascending), ``low_variance_metrics``
+        (list of flagged metric names), and ``samples`` (dict of metric name to
+        sample DataFrame, one entry per flagged metric).
     """
     variances = df[score_columns].var().sort_values()
-
-    print("Metric variances (ascending):")
-    for metric, var in variances.items():
-        flag = "  <- LOW" if var < threshold else ""
-        print(f"  {metric:<40} {var:.4f}{flag}")
-    print()
-
     low_var = variances[variances < threshold].index.tolist()
-    if not low_var:
-        print("All metrics have sufficient variance — no candidates for removal.")
-        return
 
+    samples = {}
     for metric in low_var:
-        var = variances[metric]
-        print("=" * 70)
-        print(f"WARNING: '{metric}' has low variance ({var:.4f})")
-        print("  -> Nearly constant score across all outputs.")
-        print("  -> If the samples below look reasonable, consider removing this metric.")
-        print()
-
         reason_col = metric.replace("_score", "_reason")
         sample_cols = ["original_text", "transcribed_text", "prompt", metric]
         if reason_col in df.columns:
             sample_cols.append(reason_col)
+        samples[metric] = df[sample_cols].dropna(subset=[metric]).sample(min(n_samples, len(df)))
 
-        sample = df[sample_cols].dropna(subset=[metric]).sample(min(n_samples, len(df)))
-        _print_samples(sample, [metric])
+    if verbose:
+        print("Metric variances (ascending):")
+        for metric, var in variances.items():
+            flag = "  <- LOW" if var < threshold else ""
+            print(f"  {metric:<40} {var:.4f}{flag}")
+        print()
+
+        if not low_var:
+            print("All metrics have sufficient variance — no candidates for removal.")
+
+        for metric in low_var:
+            var = variances[metric]
+            print("=" * 70)
+            print(f"WARNING: '{metric}' has low variance ({var:.4f})")
+            print("  -> Nearly constant score across all outputs.")
+            print("  -> If the samples below look reasonable, consider removing this metric.")
+            print()
+            _print_samples(samples[metric], [metric])
+
+    return {"variances": variances, "low_variance_metrics": low_var, "samples": samples}
 
 
 def show_sanity_samples(
     df: pd.DataFrame,
     score_columns: List[str],
     n_samples: int = N_SAMPLES,
-) -> None:
-    """Print a full metric breakdown for randomly selected rows.
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Sample rows for a full metric breakdown across all metrics at once.
 
-    A quick sanity-check that scores and LLM reasons look sensible across all
-    metrics at once before comparing prompts.
+    A quick sanity-check that scores and LLM reasons look sensible before
+    comparing prompts.
 
     Args:
         df: Long-format DataFrame with score and optional ``*_reason`` columns.
         score_columns: Metric score columns to display per sample.
         n_samples: Number of rows to sample.
+        verbose: If True (default), print the samples as before. Set to False
+            to compute silently, e.g. for a GUI that renders the result itself.
+
+    Returns:
+        The sampled DataFrame (``n_samples`` rows).
     """
     reason_cols = [c for c in df.columns if c.endswith("_reason")]
     display_cols = ["original_text", "transcribed_text", "prompt"] + score_columns + reason_cols
     sample = df[display_cols].sample(n_samples)
 
-    print(f"=== Sanity check: {n_samples} random samples ===\n")
-    _print_samples(sample, score_columns)
+    if verbose:
+        print(f"=== Sanity check: {n_samples} random samples ===\n")
+        _print_samples(sample, score_columns)
+
+    return sample
 
 
 # ── Prompt comparison ─────────────────────────────────────────────────────────
 
 
+def get_high_variance_samples(
+    df: pd.DataFrame,
+    stats: pd.DataFrame,
+    score_columns: Optional[List[str]] = None,
+    n_samples: int = N_SAMPLES,
+) -> Dict[str, pd.DataFrame]:
+    """Pull sample rows for each prompt flagged ``high_variance`` in ``stats``.
+
+    Mirrors the per-metric sample lookup in :func:`check_metric_variance`, but
+    keyed by prompt instead of metric — lets a caller (CLI or GUI) show the
+    LLM's reasoning for a prompt's inconsistent scores without recomputing
+    anything already done by :func:`compare_prompts`.
+
+    Args:
+        df: Long-format DataFrame with ``prompt``, score, and optional
+            ``*_reason`` columns.
+        stats: DataFrame returned by :func:`compare_prompts` (must have a
+            boolean ``high_variance`` column).
+        score_columns: Metric score columns to include per sample. Defaults
+            to :func:`get_score_columns` if not given.
+        n_samples: Number of sample rows per flagged prompt.
+
+    Returns:
+        Mapping of prompt name to a sample DataFrame, one entry per prompt
+        where ``stats.loc[prompt, "high_variance"]`` is True.
+    """
+    if score_columns is None:
+        score_columns = get_score_columns(df)
+
+    reason_cols = [c for c in df.columns if c.endswith("_reason")]
+    display_cols = ["original_text", "transcribed_text", "prompt"] + score_columns + reason_cols
+
+    flagged = stats[stats["high_variance"]]
+    samples = {}
+    for prompt in flagged.index:
+        subset = df[df["prompt"] == prompt]
+        samples[prompt] = subset[display_cols].sample(min(n_samples, len(subset)))
+    return samples
+
+
 def compare_prompts(
     df: pd.DataFrame,
     high_var_threshold: float = HIGH_VARIANCE_THRESHOLD,
+    score_columns: Optional[List[str]] = None,
+    n_samples: int = N_SAMPLES,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """Rank prompts by mean ``average_score`` and flag high-variance ones.
 
     High variance on a prompt means it performs well on some texts and poorly
-    on others — worth investigating before trusting its mean ranking.
+    on others — worth investigating before trusting its mean ranking. A
+    prompt evaluated on only a single text has an undefined sample variance
+    (pandas' ``.var()`` returns NaN for n=1); that's treated as 0.0 here —
+    "no evidence of inconsistency yet" — rather than left as NaN, so it never
+    trips the high-variance flag or breaks numeric comparisons downstream.
 
     Args:
         df: Long-format DataFrame with ``prompt`` and ``average_score`` columns.
         high_var_threshold: Variance above this triggers a HIGH VARIANCE flag.
+        score_columns: Metric score columns to show in flagged-prompt samples.
+            Defaults to :func:`get_score_columns` if not given. Unused when
+            ``verbose`` is False.
+        n_samples: Number of sample rows to print per flagged prompt.
+        verbose: If True (default), print the ranking table plus sample
+            outputs for any flagged prompt, matching the CLI report. Set to
+            False to compute silently, e.g. when a caller (such as a GUI)
+            renders the returned DataFrame itself.
 
     Returns:
-        DataFrame indexed by prompt with columns ``['mean_score', 'variance']``,
-        sorted by ``mean_score`` descending.
+        DataFrame indexed by prompt with columns ``['mean_score', 'variance',
+        'high_variance']``, sorted by ``mean_score`` descending.
     """
     stats = (
         df.groupby("prompt")["average_score"]
@@ -209,20 +312,29 @@ def compare_prompts(
         .rename(columns={"mean": "mean_score", "var": "variance"})
         .sort_values("mean_score", ascending=False)
     )
+    stats["variance"] = stats["variance"].fillna(0.0)
+    stats["high_variance"] = stats["variance"] > high_var_threshold
+
+    if not verbose:
+        return stats
 
     print("Prompt comparison (ranked by mean score):")
     print(f"  {'Prompt':<30} {'Mean':>6}  {'Var':>7}")
     print(f"  {'-'*30} {'-'*6}  {'-'*7}")
     for prompt, row in stats.iterrows():
-        flag = "  <- HIGH VARIANCE" if row["variance"] > high_var_threshold else ""
+        flag = "  <- HIGH VARIANCE" if row["high_variance"] else ""
         print(f"  {prompt:<30} {row['mean_score']:>6.3f}  {row['variance']:>7.4f}{flag}")
     print()
 
-    high_var = stats[stats["variance"] > high_var_threshold]
-    for prompt in high_var.index:
-        print(f"WARNING: '{prompt}' has high variance ({high_var.loc[prompt, 'variance']:.4f})")
+    samples = get_high_variance_samples(df, stats, score_columns, n_samples)
+    for prompt, sample in samples.items():
+        print("=" * 70)
+        print(f"WARNING: '{prompt}' has high variance ({stats.loc[prompt, 'variance']:.4f})")
         print("  -> Score swings a lot across texts — inspect outputs before trusting its rank.")
-    if not high_var.empty:
+        print()
+        _print_samples(sample, score_columns or get_score_columns(df))
+    if not samples:
+        print("All prompts have consistent scores — no candidates for further inspection.")
         print()
 
     return stats
@@ -233,26 +345,36 @@ def verify_best_prompt(
     prompt_stats: pd.DataFrame,
     score_columns: List[str],
     n_samples: int = N_SAMPLES,
-) -> None:
-    """Show sample outputs from the top-ranked prompt for manual review.
+    verbose: bool = True,
+) -> Dict[str, object]:
+    """Sample outputs from the top-ranked prompt for manual review.
 
     Args:
         df: Long-format DataFrame with ``prompt``, score, and ``*_reason`` columns.
         prompt_stats: DataFrame returned by :func:`compare_prompts`.
         score_columns: Metric score columns to display per sample.
         n_samples: Number of sample rows to show.
+        verbose: If True (default), print the samples as before. Set to False
+            to compute silently, e.g. for a GUI that renders the result itself.
+
+    Returns:
+        Dict with keys ``best_prompt`` (name), ``mean_score``, and ``samples``
+        (DataFrame of sample rows for that prompt).
     """
     best = prompt_stats.index[0]
     mean = prompt_stats.loc[best, "mean_score"]
-    print(f"Best prompt: '{best}'  (mean={mean:.3f})")
-    print("Read the outputs below — does this look like good simplification?\n")
 
     reason_cols = [c for c in df.columns if c.endswith("_reason")]
     subset = df[df["prompt"] == best]
     display_cols = ["original_text", "transcribed_text"] + score_columns + reason_cols
     sample = subset[display_cols].sample(min(n_samples, len(subset)), random_state=7)
 
-    _print_samples(sample, score_columns)
+    if verbose:
+        print(f"Best prompt: '{best}'  (mean={mean:.3f})")
+        print("Read the outputs below — does this look like good simplification?\n")
+        _print_samples(sample, score_columns)
+
+    return {"best_prompt": best, "mean_score": mean, "samples": sample}
 
 
 # ── Shared display helper ─────────────────────────────────────────────────────
@@ -305,8 +427,8 @@ if __name__ == "__main__":
 
     # Increase weight on readability metrics — they matter most for the end user.
     weights = {
-        "fk_normalized_score": 5,
-        "accessible_and_simple_score": 5,
+        "fk_normalized_score": 5.0,
+        "accessible_and_simple_score": 5.0,
     }
     df = compute_weighted_average(df, score_columns, weights)
 
