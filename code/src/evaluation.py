@@ -1,8 +1,8 @@
 """
 Pkg 3: Evaluation of simplified UHRI texts [last updated 2026-05-27]
  
-Evaluates a simplified text against its original using LLM-as-judge (Anthropic Claude), Flesch-Kincaid
-and semantic readability
+Evaluates a simplified text against its original using LLM-as-judge (Anthropic Claude) and
+Flesch-Kincaid readability
  
 Usage:
     from src.evaluation import readability, score_simplification
@@ -10,7 +10,7 @@ Usage:
     metrics   = score_simplification(record.text, simplified, orig_read)
  
 Requirements:
-    anthropic, textstat, sentence-transformers, pandas
+    anthropic, textstat, pandas
 
 Open Issues:
     - smaller models instead one big model
@@ -51,7 +51,6 @@ Resumption:
 import json
 import re
 from datetime import date
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -96,8 +95,7 @@ load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
  
 EVAL_MODEL = "claude-sonnet-4-5"
 eval_client = anthropic.Anthropic()
-# Semantic-similarity model is loaded lazily on first use (see semantic_similarity).
- 
+
 EVAL_PROMPT = """\
 You are evaluating whether a simplified version of a UN human rights text is accurate and accessible.
  
@@ -416,8 +414,8 @@ def score_simplification(
     """
     Compute all evaluation metrics for one simplified output.
  
-    Bundles the judge scores, readability deltas, and semantic similarity into
-    a single flat dict so the caller doesn't have to assemble them by hand.
+    Bundles the judge scores and readability deltas into a single flat dict
+    so the caller doesn't have to assemble them by hand.
  
     Args:
         original: The original source text.
@@ -434,7 +432,6 @@ def score_simplification(
         "fk_grade": simp_read["fk_grade"],
         # "fk_ease": simp_read["fk_ease"],
         "fk_grade_delta": orig_readability["fk_grade"] - simp_read["fk_grade"],
-        # "semantic_sim": semantic_similarity(original, simplified),
     }
     for dim, entry in scores.items():
         out[f"{dim}__score"] = entry["score"]
