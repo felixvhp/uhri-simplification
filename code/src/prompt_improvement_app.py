@@ -20,9 +20,12 @@ there once; both this GUI and the CLI script pick it up automatically.
 Both the "Metrics" and "Prompts" sidebar sections follow the same four-part
 pattern — tweak / remove / view / add — for the same reason: a metric and a
 prompt are the two "dimensions" a user compares things along, so their
-controls are deliberately symmetric (_select_active_metrics mirrors
-_select_active_prompts, _render_add_metric_form mirrors
-_render_add_prompt_form, etc.) rather than each growing its own conventions.
+controls are deliberately symmetric. Where the two sides were byte-for-byte
+identical logic (only "remove", via _select_active_items — see its
+docstring) they share one function; where they differ enough to matter
+(_render_add_metric_form / _render_add_prompt_form, "add") they stay two
+mirrored functions rather than being forced into one with a pile of
+conditionals.
 
     - Tweak: a weight slider per active metric (metrics only — a prompt
       doesn't have a "weight" the way a metric does; a prompt is a thing
@@ -74,7 +77,7 @@ Settings persistence (weights, active metrics/prompts, thresholds, etc.):
     active_metrics/active_prompts already use) — a saved value never
     clobbers a change you've since made live. active_metrics/active_prompts
     each save their "known" universe alongside the active list, for the
-    same reason _select_active_metrics tracks known_metrics: to tell "this
+    same reason _select_active_items tracks known_<kind>: to tell "this
     metric existed and I deliberately excluded it" apart from "this metric
     didn't exist yet when I saved, default it to included".
 
@@ -299,37 +302,42 @@ def _reattach_custom_metrics(df: pd.DataFrame, data_path: str, mtime: float) -> 
     return df
 
 
-def _select_active_metrics(all_metrics: list) -> list:
-    """Dropdown of which metrics feed the weighted average / comparisons.
+def _select_active_items(all_items: list, kind: str, help_text: str) -> list:
+    """Dropdown of which metrics or prompts are active — shared by both sidebar sections.
 
-    Deselecting a metric here is the "remove" action — it only hides the
-    metric from this session's analysis (weights, variance chart, prompt
-    comparison); the column stays in the data and reselecting brings it
-    right back. New metrics (a CSV column not seen before, or a freshly
-    LLM-judged one) default to included.
+    "Active" is the "remove" action for either kind — deselecting one here
+    only hides it from this session's analysis (weights/variance chart for
+    a metric; variance chart/comparison for a prompt); the underlying data
+    is untouched and reselecting brings it right back. A new item (a CSV
+    column or prompt value not seen before, or a freshly added custom one)
+    defaults to included.
 
-    Bound to ``st.session_state["active_metrics"]`` via ``key=`` rather than
-    ``default=`` so other widgets — the "remove" button on a flagged metric
-    in the Metric Variance tab — can change the selection by writing to that
+    Bound to ``st.session_state[f"active_{kind}"]`` via ``key=`` rather than
+    ``default=`` so other widgets — the "remove" button on a flagged
+    metric/prompt in its tab — can change the selection by writing to that
     key and calling ``st.rerun()``. A plain ``default=`` is only honored on
     a widget's very first render; it silently ignores later programmatic
     changes, which would make that remove button a no-op.
-    """
-    known = st.session_state.get("known_metrics", [])
-    if "active_metrics" not in st.session_state:
-        st.session_state["active_metrics"] = list(all_metrics)
-    else:
-        current = [m for m in st.session_state["active_metrics"] if m in all_metrics]
-        current += [m for m in all_metrics if m not in known]
-        st.session_state["active_metrics"] = current
-    st.session_state["known_metrics"] = list(all_metrics)
 
-    return st.multiselect(
-        "Active metrics", options=all_metrics, key="active_metrics",
-        help="Deselect a metric to exclude it from the weighted average, "
-             "variance chart, and prompt comparison. It stays in the data "
-             "and can be reselected any time.",
-    )
+    Args:
+        all_items: Every currently-available metric or prompt (all_metrics/
+            all_prompts in main()).
+        kind: "metrics" or "prompts" — used to build both the session_state
+            keys (``active_<kind>``/``known_<kind>``) and the multiselect's
+            label ("Active <kind>").
+        help_text: Tooltip text, specific to what "active" means for this kind.
+    """
+    active_key, known_key = f"active_{kind}", f"known_{kind}"
+    known = st.session_state.get(known_key, [])
+    if active_key not in st.session_state:
+        st.session_state[active_key] = list(all_items)
+    else:
+        current = [i for i in st.session_state[active_key] if i in all_items]
+        current += [i for i in all_items if i not in known]
+        st.session_state[active_key] = current
+    st.session_state[known_key] = list(all_items)
+
+    return st.multiselect(f"Active {kind}", options=all_items, key=active_key, help=help_text)
 
 
 def _render_add_metric_form(df: pd.DataFrame, data_path: str, mtime: float) -> None:
@@ -464,34 +472,6 @@ def _render_metric_descriptions(active_metrics: list, metric_descriptions: dict,
 
 
 # ── Prompt management: remove (active-prompt toggle), add (live LLM) ────────
-
-
-def _select_active_prompts(all_prompts: list) -> list:
-    """Dropdown of which prompts are included in the analysis.
-
-    Mirrors _select_active_metrics one level up: deselecting a prompt here
-    hides every row under it from the variance chart and prompt comparison —
-    reversible, the underlying rows are untouched. New prompts (a value not
-    seen in the data before, or a freshly generated one) default to included.
-
-    Bound to ``st.session_state["active_prompts"]`` via ``key=`` for the same
-    reason as active_metrics: the "remove" button on a flagged prompt in the
-    Prompt Comparison tab needs to change it programmatically.
-    """
-    known = st.session_state.get("known_prompts", [])
-    if "active_prompts" not in st.session_state:
-        st.session_state["active_prompts"] = list(all_prompts)
-    else:
-        current = [p for p in st.session_state["active_prompts"] if p in all_prompts]
-        current += [p for p in all_prompts if p not in known]
-        st.session_state["active_prompts"] = current
-    st.session_state["known_prompts"] = list(all_prompts)
-
-    return st.multiselect(
-        "Active prompts", options=all_prompts, key="active_prompts",
-        help="Deselect a prompt to exclude all its rows from the variance "
-             "chart and prompt comparison. Data stays put; reselect any time.",
-    )
 
 
 def _deactivate_prompt(prompt: str) -> None:
@@ -1003,7 +983,7 @@ def main() -> None:
             prompt_templates[slug] = meta["template"]
 
         # Seed the "active"/"known" pair from saved settings, once per session
-        # only (the same guard _select_active_metrics itself uses) — after
+        # only (the same guard _select_active_items itself uses) — after
         # this, that function's own "keep what's still active + fold in
         # anything not in known" logic runs unmodified and does the right
         # thing whether it was just seeded from disk or is mid-session.
@@ -1015,7 +995,12 @@ def main() -> None:
             st.session_state["known_prompts"] = saved_settings.get("known_prompts", [])
 
         st.header("Metrics")
-        active_metrics = _select_active_metrics(all_metrics)
+        active_metrics = _select_active_items(
+            all_metrics, "metrics",
+            help_text="Deselect a metric to exclude it from the weighted average, "
+                      "variance chart, and prompt comparison. It stays in the data "
+                      "and can be reselected any time.",
+        )
         _render_add_metric_form(df, data_path, mtime)
         _render_save_metrics_section(data_path, base_n_rows)
         _render_clear_button("custom_metrics", "custom metrics")
@@ -1031,7 +1016,11 @@ def main() -> None:
             weights[col] = st.slider(col, 0.0, 10.0, step=0.5, key=weight_key)
 
         st.header("Prompts")
-        active_prompts = _select_active_prompts(all_prompts)
+        active_prompts = _select_active_items(
+            all_prompts, "prompts",
+            help_text="Deselect a prompt to exclude all its rows from the variance "
+                      "chart and prompt comparison. Data stays put; reselect any time.",
+        )
         _render_add_prompt_form(df, data_path, mtime, base_n_rows)
         _render_save_prompts_section(data_path, base_n_rows)
         _render_clear_button("custom_prompts", "added prompts")
