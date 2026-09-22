@@ -60,6 +60,16 @@ The "score" field must be a JSON boolean (true or false), never a string. The "r
 # Dictionary with:
 #   keys: the name of the dimension.
 #   values: the description of the dimension.
+#
+# Previous 5-dimension version, kept for reference during the 5 -> 9
+# transition (delete once the team has reviewed the refactor):
+# EVAL_DIMENSIONS = {
+#     "content_preserved": "Does the simplified text preserve ALL important obligations, actions, and decisions from the original?",
+#     "actors_preserved": "Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed)?",
+#     "no_meaning_change":  "Does the simplified text avoid changing the meaning, strength, or conditions of the original (e.g. 'must' vs 'should', removing exceptions)?",
+#     "no_hallucination": "Is the simplified text free of any new information, claims, or interpretations not present in the original?",
+#     "accessible_and_simple": "Is the simplified text clearly easier to read and understandable to a non-expert, while still preserving the important meaning?",
+# }
 EVAL_DIMENSIONS = {
     # --- Fidelity: compare simplified against the original RECORD. Strict. ---
     "obligations_complete": (

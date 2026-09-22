@@ -307,6 +307,8 @@ if __name__ == "__main__":
     # Keys must match the CSV's <dimension>__score columns (see EVAL_DIMENSIONS).
     weights = {
         "fk_normalized_score": 5,
+        # "accessible_and_simple_score": 5,  # dimension split in the 5 -> 9
+        # refactor into the two below; both kept at x5 (review: or x2.5 each?)
         "plain_vocabulary__score": 5,
         "standalone_comprehension__score": 5,
     }
