@@ -304,9 +304,11 @@ if __name__ == "__main__":
     # TODO: have the weights be changable in the metrics loop somehow.
 
     # Increase weight on readability metrics — they matter most for the end user.
+    # Keys must match the CSV's <dimension>__score columns (see EVAL_DIMENSIONS).
     weights = {
         "fk_normalized_score": 5,
-        "accessible_and_simple_score": 5,
+        "plain_vocabulary__score": 5,
+        "standalone_comprehension__score": 5,
     }
     df = compute_weighted_average(df, score_columns, weights)
 
