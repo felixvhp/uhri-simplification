@@ -35,11 +35,15 @@ def test_readability_returns_expected_keys():
 # --- LLM-mocked tests ---
 
 MOCK_LLM_RESPONSE = """some random gibberish {
-    "content_preserved":     {"score": true,  "reason": "ok"},
-    "actors_preserved":      {"score": true,  "reason": "ok"},
-    "no_meaning_change":     {"score": false, "reason": "changed must->should"},
-    "no_hallucination":      {"score": true,  "reason": "ok"},
-    "accessible_and_simple": {"score": true,  "reason": "ok"}
+    "obligations_complete":       {"score": true,  "reason": "ok"},
+    "actors_exact":               {"score": true,  "reason": "ok"},
+    "deontic_force":              {"score": false, "reason": "changed must->should"},
+    "terms_of_art":               {"score": true,  "reason": "ok"},
+    "references_precise":         {"score": true,  "reason": "ok"},
+    "scope_and_qualifiers":       {"score": true,  "reason": "ok"},
+    "additions_explanatory_only": {"score": true,  "reason": "ok"},
+    "plain_vocabulary":           {"score": true,  "reason": "ok"},
+    "standalone_comprehension":   {"score": true,  "reason": "ok"}
 }"""
 
 
@@ -54,8 +58,8 @@ def _mock_client(response_text):
 def test_evaluate_parses_valid_json():
     with patch("src.evaluation.eval_client", _mock_client(MOCK_LLM_RESPONSE)):
         result = evaluate("original", "simplified")
-    assert result["content_preserved"]["score"] == 1
-    assert result["no_meaning_change"]["score"] == 0
+    assert result["obligations_complete"]["score"] == 1
+    assert result["deontic_force"]["score"] == 0
 
 
 def test_evaluate_handles_bad_json():
@@ -68,11 +72,11 @@ def test_evaluate_handles_bad_json():
 def test_evaluate_handles_missing_dimension():
     # Response missing one dimension — that dim should get score -1
     partial = MOCK_LLM_RESPONSE.replace(
-        '"no_hallucination":      {"score": true,  "reason": "ok"},\n', ""
+        '"references_precise":         {"score": true,  "reason": "ok"},\n', ""
     )
     with patch("src.evaluation.eval_client", _mock_client(partial)):
         result = evaluate("original", "simplified")
-    assert result["no_hallucination"]["score"] == -1
+    assert result["references_precise"]["score"] == -1
 
 def build_prompt_context():
     prompt_mock = """

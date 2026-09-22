@@ -107,7 +107,7 @@ def run_experiment(records, prompts=PROMPTS, model=MODEL):
                 "transcribed_text": conversion,
             }
             for k, v in metrics.items():
-                row[k.replace("__", "_")] = v
+                row[k] = v
             rows.append(row)
 
     return rows

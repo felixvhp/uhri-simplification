@@ -61,13 +61,65 @@ The "score" field must be a JSON boolean (true or false), never a string. The "r
 #   keys: the name of the dimension.
 #   values: the description of the dimension.
 EVAL_DIMENSIONS = {
-    "content_preserved": "Does the simplified text preserve ALL important obligations, actions, and decisions from the original?",
-    "actors_preserved": "Are ALL responsible actors and affected parties correctly identified (no actors removed, generalized, or changed)?",
-    "no_meaning_change":  "Does the simplified text avoid changing the meaning, strength, or conditions of the original (e.g. 'must' vs 'should', removing exceptions)?",
-    "no_hallucination": "Is the simplified text free of any new information, claims, or interpretations not present in the original?",
-    "accessible_and_simple": "Is the simplified text clearly easier to read and understandable to a non-expert, while still preserving the important meaning?",
+    # --- Fidelity: compare simplified against the original RECORD. Strict. ---
+    "obligations_complete": (
+        "Does the simplified text contain EVERY obligation, recommendation, "
+        "concern and decision from the original? Any important element that is "
+        "omitted or compressed away fails."
+    ),
+    "actors_exact": (
+        "Is it clear who is called on to act and who is affected, and does that "
+        "match the record? Naming the country where the original text says 'the "
+        "State party', or naming the body where it says 'the Committee', is "
+        "CORRECT: the record supplies those and resolving them is the point. Fail "
+        "only if an actor is dropped, swapped, invented, or generalized away "
+        "(e.g. to 'the relevant authorities')."
+    ),
+    "deontic_force": (
+        "Is the strength of each ask preserved in BOTH directions? "
+        "'recommends'/'urges'/'calls upon' must not soften to 'should' or 'may', "
+        "and 'should'/'consider' must not harden to 'must'. An imperative must not "
+        "become an optional suggestion. Any shift either way fails."
+    ),
+    "terms_of_art": (
+        "Are legal and human-rights terms with defined meaning kept, or "
+        "kept-and-glossed? Words like 'arbitrary', 'impunity', 'ratification', "
+        "'adequate housing', 'enforced disappearance', 'non-refoulement', "
+        "'reasonable accommodation' carry specific meaning that a plain synonym "
+        "destroys. Replacing one with an everyday word fails "
+        "('arbitrary'->'unfair', 'impunity'->'lack of punishment'); keeping the "
+        "term, with or without an added explanation, passes."
+    ),
+    "references_precise": (
+        "Are article citations, treaty and instrument names, general "
+        "comment/recommendation numbers, named domestic laws, dates, statistics, "
+        "case names and personal names all reproduced accurately? Dropping a "
+        "citation such as '(arts. 12 and 24)' fails: it is the legal hook."
+    ),
+    "scope_and_qualifiers": (
+        "Do all conditions, exceptions, deadlines and scope markers survive with "
+        "their force intact? 'including', 'in particular', 'such as' and "
+        "'especially' introduce non-exhaustive examples and must not be rewritten "
+        "as complete lists; 'where appropriate' must not be dropped; explicit "
+        "timeframes must remain."
+    ),
+    "additions_explanatory_only": (
+        "Is every piece of text not present in the original purely an explanation "
+        "of a term that IS in the original (e.g. a parenthetical definition), and "
+        "is each such explanation factually correct? Any new claim, "
+        "interpretation, or inaccurate definition fails."
+    ),
+    # --- Accessibility: judge the simplified text ON ITS OWN. ---
+    "plain_vocabulary": (
+        "Judging the simplified text alone: is the vocabulary everyday language, "
+        "with any remaining technical or legal term briefly explained on first use?"
+    ),
+    "standalone_comprehension": (
+        "Could a non-expert reading ONLY the simplified text correctly answer: "
+        "who is being asked to do what, about which issue, in which country? If "
+        "any of those is missing or guessable only from outside knowledge, fails."
+    ),
 }
- 
  
 def evaluate(
     raw_record,
