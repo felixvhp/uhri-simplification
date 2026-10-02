@@ -24,3 +24,6 @@ venv311/
 # Caches
 .pytest_cache/
 .mypy_cache/
+
+# reviewer submissions collected by review/serve_review.py (data, not source)
+code/review/exports/

@@ -64,13 +64,17 @@ def load_eval_dimensions() -> dict:
     return dims
 
 
-def main() -> None:
+def build_axes() -> list[dict]:
+    """The review axes: standard metrics joined with their labels and groups.
+
+    Shared by main() (baked into the standalone page) and serve_review.py's
+    /api/axes (served live), so both delivery modes show identical questions.
+    """
     dims = load_eval_dimensions()
     missing = set(dims) - set(LABELS)
     if missing:
         raise SystemExit(f"Add short labels for new dimensions: {sorted(missing)}")
-
-    axes = [
+    return [
         {
             "key": k,
             "t": LABELS[k],
@@ -80,6 +84,9 @@ def main() -> None:
         for k, v in dims.items()
     ]
 
+
+def main() -> None:
+    axes = build_axes()
     data = json.loads(DATA.read_text())
     html = TEMPLATE.read_text()
     html = html.replace("/*__DIMENSIONS__*/[]", json.dumps(axes, ensure_ascii=False, indent=2), 1)

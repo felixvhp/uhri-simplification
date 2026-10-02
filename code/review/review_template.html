@@ -191,7 +191,7 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-head">
       <h2 id="modal-title">Export feedback</h2>
-      <p>Copy the text below (or download the file) and send it back to the team. It holds every review recorded on this device. No names or personal data are collected.</p>
+      <p id="export-note">Copy the text below (or download the file) and send it back to the team. It holds every review recorded on this device. No names or personal data are collected.</p>
     </div>
     <div class="modal-body">
       <div class="tabs">
@@ -201,6 +201,7 @@
       <textarea id="export-text" readonly spellcheck="false"></textarea>
     </div>
     <div class="modal-foot">
+      <button class="go" id="submit-btn" hidden>Submit to team</button>
       <button class="nav" id="copy-btn">Copy to clipboard</button>
       <button class="nav" id="download-btn">Download file</button>
       <span class="spacer"></span>
@@ -210,8 +211,12 @@
 </div>
 
 <script>
-const REVIEW_DATA = /*__REVIEW_DATA__*/[];
-const DIMENSIONS  = /*__DIMENSIONS__*/[];
+// Baked by build_review_tool.py for the standalone file. When served raw by
+// serve_review.py these stay empty and boot() fetches both from its API
+// instead — same page, two delivery modes.
+let REVIEW_DATA = /*__REVIEW_DATA__*/[];
+let DIMENSIONS  = /*__DIMENSIONS__*/[];
+let API = false;   // true when data came from the server (enables direct submit)
 
 const PRIMARY = "prompt_felix";
 const VARIANT_LABELS = {
@@ -425,7 +430,26 @@ function closeExport(){ document.getElementById("overlay").classList.remove("sho
 
 function setBtn(id,txt){ const b=document.getElementById(id); const old=b.textContent; b.textContent=txt; setTimeout(()=>{b.textContent=old;},1400); }
 
+function wireSubmit(){
+  const btn=document.getElementById("submit-btn");
+  if(!API){ btn.hidden=true; return; }
+  btn.hidden=false;
+  document.getElementById("export-note").textContent=
+    "Click Submit to send your review straight to the team, or copy/download it below. "+
+    "It holds every review recorded on this device. No names or personal data are collected.";
+  btn.onclick=async()=>{
+    btn.disabled=true;
+    try {
+      const r=await fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:buildJSON()});
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      setBtn("submit-btn","Submitted ✓");
+    } catch(e){ setBtn("submit-btn","Failed — use copy/download"); }
+    btn.disabled=false;
+  };
+}
+
 function init(){
+  wireSubmit();
   document.getElementById("export-btn").onclick=openExport;
   document.getElementById("close-modal").onclick=closeExport;
   document.getElementById("overlay").onclick=(e)=>{ if(e.target.id==="overlay") closeExport(); };
@@ -455,5 +479,24 @@ function init(){
   computeWorkingSet();
   render();
 }
-init();
+
+async function boot(){
+  if(!REVIEW_DATA.length || !DIMENSIONS.length){
+    try {
+      const [axes, records] = await Promise.all([
+        fetch("/api/axes").then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+        fetch("/api/records").then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+      ]);
+      DIMENSIONS=axes; REVIEW_DATA=records; API=true;
+    } catch(e){
+      document.getElementById("wrap").innerHTML=
+        '<div class="panel" style="padding:20px 24px"><strong>Could not load review data.</strong>'+
+        '<p class="hint">This page was opened without baked-in data and its server API is unreachable. '+
+        'Either open the built translation_review.html, or serve this page with review/serve_review.py.</p></div>';
+      return;
+    }
+  }
+  init();
+}
+boot();
 </script>
