@@ -110,7 +110,13 @@ Resumption — how to scale this up when it outgrows a single file:
       more entry to the `STEPS` list. Nothing else needs to change.
     - New metric in the CSV: no code change needed — weight sliders and
       variance tables are generated from `get_score_columns(df)`, so a new
-      `*_score` column just shows up.
+      `*_score` column just shows up. This includes a metric retired from
+      metrics.json (`active: false`, see evaluation.py's docstring): its
+      already-computed column keeps showing here with its description
+      intact (metric_descriptions below reads ALL of metrics.json, not
+      just the active subset) — `active` only gates whether it's part of
+      EVAL_DIMENSIONS for a *new* judging run, not whether existing data
+      for it is still viewable/selectable here.
     - Growing past a handful of steps/tabs: split each render_* function out
       into its own module under src/gui/ and import them here; `st.tabs` can
       be swapped for `st.navigation`/multipage app structure without touching

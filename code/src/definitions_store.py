@@ -8,9 +8,19 @@ Both evaluation.py (metrics.json: the 5 standard EVAL_DIMENSIONS plus any
 custom metric added via the GUI) and prompts.py (prompts.json: the 5
 standard PROMPTS plus any custom prompt) persist a "standard vs custom"
 definitions file with the exact same shape and rules:
-    - One JSON file: slug -> {"name", <content field>, "standard", "date_added"}.
+    - One JSON file: slug -> {"name", <content field>, "standard", "active",
+      "date_added"}.
     - Read: missing file -> {}.
     - "Custom" means an entry's `standard` isn't True.
+    - An entry is never deleted from the file just because it's no longer
+      wanted — e.g. a standard dimension retired in a judge-prompt rewrite,
+      or a custom one that didn't pan out. It's marked `"active": false`
+      instead (see set_active()), so its definition/history survives and
+      EVAL_DIMENSIONS/PROMPTS/the GUI's metric list can all filter on the
+      same flag rather than silently going out of sync with each other.
+      `entry.get("active", True)` treats a missing key (any entry written
+      before this field existed) as active, so nothing needs a one-time
+      migration.
     - Saving a custom entry always reads/writes the *whole* file (never
       just the custom subset), so it can never accidentally drop the
       standard ones sharing the file.
@@ -79,6 +89,21 @@ class DefinitionsStore:
             if not entry.get("standard")
         }
 
+    def load_active(self, path: Optional[Path] = None) -> dict:
+        """Load every ACTIVE definition — standard and custom, together.
+
+        "Active" (the default for any entry missing the key) means not
+        retired via set_active(slug, False, ...). This is what
+        EVAL_DIMENSIONS/PROMPTS and the GUI's metric/prompt list should
+        filter on instead of re-deriving their own notion of "currently
+        wanted", so they can't drift apart from each other.
+        """
+        return {
+            slug: entry
+            for slug, entry in self.load_all(path).items()
+            if entry.get("active", True)
+        }
+
     def save_custom(
         self,
         slug: str,
@@ -87,7 +112,7 @@ class DefinitionsStore:
         path: Optional[Path] = None,
         date_added: Optional[str] = None,
     ) -> None:
-        """Persist one custom definition (name + content).
+        """Persist one custom definition (name + content), active by default.
 
         Reads and rewrites the *entire* file (via load_all(), not
         load_custom()) so saving a new custom entry can never accidentally
@@ -113,8 +138,36 @@ class DefinitionsStore:
             "name": name,
             self.content_field: content,
             "standard": False,
+            "active": True,
             "date_added": date_added or date.today().isoformat(),
         }
+        with open(path, "w") as f:
+            json.dump(definitions, f, indent=2, sort_keys=True)
+            f.write("\n")
+
+    def set_active(self, slug: str, active: bool, path: Optional[Path] = None) -> None:
+        """Retire or restore one definition in place, without touching the rest.
+
+        Flips just the `active` flag on an existing entry (standard or
+        custom) — its name/content/date_added/standard are untouched. Use
+        this instead of deleting an entry from the JSON file: a retired
+        standard dimension (e.g. one dropped in a judge-prompt rewrite)
+        keeps its description and history, and can be reactivated later by
+        calling this again with active=True.
+
+        Args:
+            slug: The definition's key. Must already exist in the file.
+            active: True to (re)activate, False to retire/hide it.
+            path: JSON file to write. Defaults to this store's path.
+
+        Raises:
+            KeyError: If ``slug`` isn't in the file.
+        """
+        path = path or self.default_path
+        definitions = self.load_all(path)
+        if slug not in definitions:
+            raise KeyError(f"No such definition: '{slug}'")
+        definitions[slug]["active"] = active
         with open(path, "w") as f:
             json.dump(definitions, f, indent=2, sort_keys=True)
             f.write("\n")
