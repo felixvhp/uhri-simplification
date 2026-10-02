@@ -422,9 +422,14 @@ if __name__ == "__main__":
     # TODO: have the weights be changable in the metrics loop somehow.
 
     # Increase weight on readability metrics — they matter most for the end user.
+    # Keys must match the CSV's <dimension>_score columns (see EVAL_DIMENSIONS;
+    # score_simplification()'s "__" is flattened to "_" by _build_row()).
     weights = {
         "fk_normalized_score": 5.0,
-        "accessible_and_simple_score": 5.0,
+        # "accessible_and_simple_score": 5.0,  # dimension split in the 5 -> 9
+        # refactor into the two below; both kept at x5 (review: or x2.5 each?)
+        "plain_vocabulary_score": 5.0,
+        "standalone_comprehension_score": 5.0,
     }
     df = compute_weighted_average(df, score_columns, weights)
 

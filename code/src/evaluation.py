@@ -119,12 +119,16 @@ The "score" field must be a JSON boolean (true or false), never a string. The "r
 # (below) and every existing caller/test expect. This is what gets judged
 # on *every* simplification by default; a custom (standard: false) metric
 # in the same file is judged only on demand, via evaluate_new_metric().
+#
+# The 9 fine-grained dimensions below (replacing the original 5 -- see
+# metrics.json's git history for that version) live in metrics.json like
+# every other standard entry, rather than as a hardcoded dict, so they go
+# through the same load/save path as a custom metric.
 EVAL_DIMENSIONS = {
     slug: entry["description"]
     for slug, entry in load_all_metric_definitions().items()
     if entry.get("standard")
 }
- 
  
 def evaluate(
     raw_record,

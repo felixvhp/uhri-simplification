@@ -1,0 +1,459 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plain-English Translation Review</title>
+<style>
+  /* Design system adopted verbatim from static/styles.css (retrieval-eval-prototype) */
+  :root {
+    --bg:#f4f6fb; --panel:#ffffff; --panel2:#f7f9fc; --line:#e2e7f0;
+    --line2:#eef1f7; --ink:#1c2333; --ink2:#39435c; --muted:#69748f;
+    --accent:#2f5bd0; --accent-soft:#eaf0fd; --accent-ink:#1c3e9e;
+    --rec:#2f5bd0; --rec-bg:#eaf0fd; --rec-line:#cdddfb;
+    --obs:#b06a00; --obs-bg:#fdf2e0; --obs-line:#f3ddb4;
+    --good:#1f8a5b; --good-bg:#e7f6ee; --good-line:#bfe6d2;
+    --crit:#c0392b; --crit-bg:#fbeae8; --crit-line:#f0c9c4;   /* added, palette-consistent */
+    --warn:#b4541b;
+    --shadow:0 1px 2px rgba(20,30,60,.04),0 4px 16px rgba(20,30,60,.05);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.55 var(--font); -webkit-font-smoothing:antialiased; }
+  h1,h2,h3 { margin:0; text-wrap:balance; }
+  button { font-family:inherit; cursor:pointer; }
+  ::selection { background:var(--accent-soft); }
+
+  /* ---- Header (their pattern) ---- */
+  header { padding:18px 0; border-bottom:1px solid var(--line); background:var(--panel);
+    position:sticky; top:0; z-index:20; }
+  .hdr { max-width:1080px; margin:0 auto; padding:0 28px; display:flex; align-items:center; gap:14px; }
+  .brand { width:38px; height:38px; border-radius:9px; flex:none;
+    background:linear-gradient(135deg,#2f5bd0,#5b86e8); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:700;
+    font-size:15px; letter-spacing:.5px; box-shadow:var(--shadow); }
+  .hdr-title { margin-right:auto; }
+  .hdr-title h1 { font-size:18px; font-weight:650; letter-spacing:-.1px; }
+  .hdr-title p { margin:2px 0 0; color:var(--muted); font-size:12.5px; }
+  .hdr-tools { display:flex; align-items:center; gap:14px; }
+  .rev { display:flex; align-items:center; gap:8px; }
+  .rev .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:600; }
+  .rev input { font:inherit; font-size:13px; color:var(--ink); background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; padding:7px 10px; width:150px; }
+  .rev input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  button.go { padding:9px 18px; font-size:14px; font-weight:600; background:var(--accent);
+    color:#fff; border:0; border-radius:10px; box-shadow:var(--shadow); transition:background .15s; white-space:nowrap; }
+  button.go:hover { background:#274fbb; }
+  button.go:focus-visible { outline:2px solid var(--accent-ink); outline-offset:2px; }
+
+  .wrap { max-width:1080px; margin:0 auto; padding:24px 28px 90px; }
+
+  /* ---- Pager ---- */
+  .pager { display:flex; align-items:center; gap:16px; padding:12px 16px; margin-bottom:18px; }
+  .assign { display:flex; align-items:center; gap:12px 18px; padding:11px 16px; margin-bottom:14px; flex-wrap:wrap; }
+  .assign .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:600; }
+  .assign-n { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink2); font-weight:600; }
+  .assign-n input { width:64px; padding:6px 8px; background:var(--panel2); border:1px solid var(--line); border-radius:7px; color:var(--ink); font:inherit; font-size:13px; }
+  .assign-n input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .assign-note { font-size:12.5px; color:var(--muted); flex:1 1 240px; min-width:0; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
+  .nav { background:var(--panel2); color:var(--ink2); border:1px solid var(--line);
+    border-radius:8px; padding:7px 13px; font-size:13px; font-weight:600; transition:all .12s; white-space:nowrap; }
+  .nav:hover:not(:disabled) { color:var(--ink); border-color:#cfd8e8; }
+  .nav:disabled { opacity:.45; cursor:default; }
+  .reclabel { font-size:13px; color:var(--ink2); font-weight:600; font-variant-numeric:tabular-nums; }
+  .dots { display:flex; gap:7px; flex-wrap:wrap; margin:0 auto 0 4px; }
+  .dot { width:15px; height:15px; border-radius:50%; border:2px solid var(--line);
+    background:var(--panel2); cursor:pointer; padding:0; transition:transform .1s, border-color .12s; }
+  .dot:hover { transform:scale(1.15); }
+  .dot.here { box-shadow:0 0 0 3px var(--accent-soft); border-color:var(--accent); }
+  .dot.done-good { background:var(--good); border-color:var(--good); }
+  .dot.done-warn { background:var(--obs); border-color:var(--obs); }
+  .dot.done-crit { background:var(--crit); border-color:var(--crit); }
+  .prog { display:flex; align-items:center; gap:9px; font-size:12.5px; color:var(--muted);
+    font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .track { width:80px; height:6px; border-radius:4px; background:var(--panel2); border:1px solid var(--line); overflow:hidden; }
+  .fill { height:100%; background:var(--accent); width:0%; transition:width .3s; }
+
+  .lede { color:var(--ink2); font-size:13.5px; margin:0 0 18px; max-width:66ch; }
+  .lede strong { color:var(--ink); font-weight:650; }
+
+  /* ---- Compare panels ---- */
+  .compare { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  @media (max-width:820px){ .compare { grid-template-columns:1fr; } }
+  .panel-head { display:flex; align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid var(--line);
+    font-size:11px; text-transform:uppercase; letter-spacing:.6px; font-weight:650; }
+  .panel-head .tag { margin-left:auto; text-transform:none; letter-spacing:0; font-size:11.5px; font-weight:600; color:var(--muted); }
+  .panel.orig .panel-head { color:var(--ink2); }
+  .panel.orig .doc { background:var(--panel2); }
+  .panel.draft { border-color:var(--rec-line); }
+  .panel.draft .panel-head { color:var(--accent); }
+  .doc { padding:16px 18px 20px; font-size:14.5px; line-height:1.62; color:var(--ink2); white-space:pre-wrap; }
+
+  details.others { margin:-6px 0 20px; }
+  details.others summary { font-size:12.5px; color:var(--ink2); cursor:pointer; padding:7px 2px; list-style:none;
+    display:inline-flex; align-items:center; gap:6px; }
+  details.others summary::-webkit-details-marker { display:none; }
+  details.others summary::before { content:"▸"; color:var(--muted); transition:transform .15s; display:inline-block; }
+  details.others[open] summary::before { transform:rotate(90deg); }
+  .other-grid { display:grid; gap:9px; margin-top:8px; }
+  .other-card { border:1px solid var(--line); border-radius:10px; padding:11px 14px; background:var(--panel); }
+  .other-card .name { font-family:var(--mono); font-size:11.5px; color:var(--accent); margin-bottom:5px; }
+  .other-card .txt { font-size:13px; color:var(--ink2); line-height:1.55; white-space:pre-wrap; }
+
+  /* ---- Review ---- */
+  .review { padding:20px 22px 22px; }
+  .review > h2 { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:650; margin-bottom:6px; }
+  .dim-group { font-size:11px; text-transform:uppercase; letter-spacing:.55px; color:var(--accent); font-weight:650; padding:18px 2px 2px; }
+  .dim-group:first-of-type { padding-top:8px; }
+  .dims { display:flex; flex-direction:column; }
+  .dim { display:flex; align-items:center; gap:16px; padding:11px 2px; border-top:1px solid var(--line2); }
+  .dim-group + .dim { border-top:none; }
+  .dim-label { flex:1; min-width:0; }
+  .dim-label .t { font-size:14px; font-weight:600; }
+  .dim-label .d { font-size:12.5px; color:var(--muted); margin-top:2px; line-height:1.45; }
+  .seg { display:inline-flex; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:3px; gap:3px; flex:none; }
+  .seg button { border:0; background:transparent; color:var(--ink2); padding:6px 15px; border-radius:6px;
+    font-size:13px; font-weight:600; transition:all .12s; }
+  .seg button:hover { color:var(--ink); }
+  .seg button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .seg button.on-good { background:var(--good); color:#fff; box-shadow:var(--shadow); }
+  .seg button.on-crit { background:var(--crit); color:#fff; box-shadow:var(--shadow); }
+
+  .field { margin-top:22px; }
+  .field-label { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:650; margin-bottom:10px; }
+  .field-label .soft { text-transform:none; letter-spacing:0; font-weight:400; color:var(--muted); }
+  .verdicts { display:flex; flex-wrap:wrap; gap:9px; }
+  .verdict { display:inline-flex; align-items:center; gap:8px; cursor:pointer; border:1px solid var(--line);
+    border-radius:999px; padding:9px 15px; font-size:13.5px; font-weight:600; color:var(--ink2); transition:all .12s; }
+  .verdict:hover { border-color:#cfd8e8; }
+  .verdict .sw { width:9px; height:9px; border-radius:50%; }
+  .verdict[data-v=good] .sw { background:var(--good); }
+  .verdict[data-v=warn] .sw { background:var(--obs); }
+  .verdict[data-v=crit] .sw { background:var(--crit); }
+  .verdict.sel[data-v=good] { background:var(--good-bg); border-color:var(--good-line); color:#136a44; }
+  .verdict.sel[data-v=warn] { background:var(--obs-bg); border-color:var(--obs-line); color:var(--obs); }
+  .verdict.sel[data-v=crit] { background:var(--crit-bg); border-color:var(--crit-line); color:var(--crit); }
+  .verdict input { position:absolute; opacity:0; pointer-events:none; }
+  .verdict:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+
+  textarea { width:100%; font:inherit; font-size:13.5px; line-height:1.55; color:var(--ink);
+    background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:11px 13px; resize:vertical; min-height:64px; }
+  textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  textarea.correction { min-height:96px; background:var(--panel); }
+  .hint { font-size:11.5px; color:var(--muted); margin:6px 0 0; }
+
+  .footnav { display:flex; align-items:center; gap:12px; margin-top:24px; }
+  .footnav .spacer { margin-left:auto; }
+  .saved { font-size:12px; color:var(--good); font-weight:600; opacity:0; transition:opacity .3s; }
+  .saved.show { opacity:1; }
+
+  /* ---- Export modal ---- */
+  .overlay { position:fixed; inset:0; background:rgba(20,30,60,.45); backdrop-filter:blur(2px); z-index:40;
+    display:none; align-items:center; justify-content:center; padding:24px; }
+  .overlay.show { display:flex; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);
+    width:min(720px,100%); max-height:86vh; display:flex; flex-direction:column; overflow:hidden; }
+  .modal-head { padding:18px 22px; border-bottom:1px solid var(--line); }
+  .modal-head h2 { font-size:16px; font-weight:650; }
+  .modal-head p { font-size:12.5px; color:var(--ink2); margin:5px 0 0; }
+  .modal-body { padding:16px 22px; overflow-y:auto; }
+  .tabs { display:inline-flex; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:3px; margin-bottom:12px; }
+  .tabs button { border:0; background:transparent; color:var(--ink2); font-size:12.5px; font-weight:600; padding:6px 14px; border-radius:6px; }
+  .tabs button.on { background:var(--accent); color:#fff; box-shadow:var(--shadow); }
+  .modal-body textarea { min-height:240px; font-family:var(--mono); font-size:11.5px; white-space:pre; overflow-wrap:normal; }
+  .modal-foot { display:flex; gap:10px; padding:15px 22px; border-top:1px solid var(--line); }
+  .modal-foot .spacer { margin-left:auto; }
+
+  @media (max-width:720px){
+    .hdr { flex-wrap:wrap; }
+    .hdr-tools { width:100%; }
+    .rev input { width:100%; }
+  }
+  @media (prefers-reduced-motion:reduce){ * { transition:none !important; animation:none !important; } }
+</style>
+
+<header>
+  <div class="hdr">
+    <div class="brand">UN</div>
+    <div class="hdr-title">
+      <h1>Plain-English Translation Review</h1>
+      <p>Human check of AI-drafted plain-English versions of UN human-rights texts</p>
+    </div>
+    <div class="hdr-tools">
+      <button class="go" id="export-btn">Export feedback</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap" id="wrap"></div>
+
+<div class="overlay" id="overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-head">
+      <h2 id="modal-title">Export feedback</h2>
+      <p>Copy the text below (or download the file) and send it back to the team. It holds every review recorded on this device. No names or personal data are collected.</p>
+    </div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button data-fmt="json" class="on">JSON</button>
+        <button data-fmt="csv">CSV (spreadsheet)</button>
+      </div>
+      <textarea id="export-text" readonly spellcheck="false"></textarea>
+    </div>
+    <div class="modal-foot">
+      <button class="nav" id="copy-btn">Copy to clipboard</button>
+      <button class="nav" id="download-btn">Download file</button>
+      <span class="spacer"></span>
+      <button class="go" id="close-modal">Done</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const REVIEW_DATA = /*__REVIEW_DATA__*/[];
+const DIMENSIONS  = /*__DIMENSIONS__*/[];
+
+const PRIMARY = "prompt_felix";
+const VARIANT_LABELS = {
+  prompt_felix:"Preserve-detail draft", summarise:"Summary draft",
+  accessible_transcribe:"Accessibility draft", simple_summary:"Plain-summary draft",
+  literal_transcribe:"Literal draft",
+};
+const VERDICTS = [
+  { v:"good", label:"Usable as first draft" },
+  { v:"warn", label:"Needs edits" },
+  { v:"crit", label:"Not usable" },
+];
+const STORE_KEY = "uhri_review_v2";
+const state = loadState();
+let current = 0;
+let workingSet = [];   // indices into REVIEW_DATA assigned to this reviewer
+
+function strHash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function sampleSize(){ const M=REVIEW_DATA.length, n=state.sampleN; return (!n||n<1||n>=M)?M:n; }
+function deviceSeed(){ if(!state.deviceSeed){ state.deviceSeed=(Math.floor(Math.random()*4294967296))>>>0; persist(); } return state.deviceSeed; }
+function computeWorkingSet(){
+  const M=REVIEW_DATA.length, N=sampleSize();
+  if(N>=M){ workingSet=REVIEW_DATA.map((_,i)=>i); return; }
+  const idx=REVIEW_DATA.map((_,i)=>i);
+  const rng=mulberry32(deviceSeed());   // anonymous per-device seed; no name collected
+  for(let i=idx.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); const tmp=idx[i]; idx[i]=idx[j]; idx[j]=tmp; }
+  workingSet=idx.slice(0,N).sort((a,b)=>a-b);   // show in document order
+}
+
+function loadState(){ try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {reviewer:"",ann:{}}; } catch(e){ return {reviewer:"",ann:{}}; } }
+function persist(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch(e){} flashSaved(); }
+function annOf(id){ if(!state.ann[id]) state.ann[id]={dims:{},verdict:null,correction:null,notes:"",variant:PRIMARY}; return state.ann[id]; }
+function draftText(it){ return it.variants[PRIMARY] || it.variants[Object.keys(it.variants)[0]] || ""; }
+function firstLine(t,n){ const s=t.replace(/\s+/g," ").trim(); return s.length>n?s.slice(0,n)+"…":s; }
+function verdictClass(v){ return v==="good"?"done-good":v==="warn"?"done-warn":v==="crit"?"done-crit":""; }
+let savedTimer=null;
+function flashSaved(){ const el=document.getElementById("saved"); if(!el) return; el.classList.add("show"); clearTimeout(savedTimer); savedTimer=setTimeout(()=>el.classList.remove("show"),1200); }
+function escapeHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function render(){
+  const realIdx = workingSet[current];
+  const item = REVIEW_DATA[realIdx];
+  const a = annOf(item.id);
+  const others = Object.keys(item.variants).filter(k=>k!==PRIMARY);
+  const othersHtml = others.length ? (
+    '<details class="others"><summary>Compare the '+others.length+' other AI drafts of this record</summary>'+
+    '<div class="other-grid">'+others.map(k=>
+      '<div class="other-card"><div class="name">'+escapeHtml(VARIANT_LABELS[k]||k)+'</div>'+
+      '<div class="txt">'+escapeHtml(item.variants[k])+'</div></div>').join("")+
+    '</div></details>'
+  ) : "";
+
+  const M=REVIEW_DATA.length, N=sampleSize(), sampling=N<M;
+  document.getElementById("wrap").innerHTML =
+    '<div class="assign panel">'+
+      '<span class="lbl">Your review set</span>'+
+      '<label class="assign-n">Sample size <input id="sampleN" type="number" min="1" max="'+M+'" value="'+N+'"></label>'+
+      '<span class="assign-note">'+(sampling
+        ? 'Showing a random '+N+' of '+M+' records.'
+        : 'Showing all '+M+' records. Lower the sample size to review a random subset.')+'</span>'+
+    '</div>'+
+    '<div class="pager panel">'+
+      '<button class="nav" id="prev">← Prev</button>'+
+      '<span class="reclabel">Record '+(realIdx+1)+' <span style="color:var(--muted);font-weight:400">· '+(current+1)+' / '+workingSet.length+' in your set</span></span>'+
+      '<div class="dots" id="dots"></div>'+
+      '<span class="prog"><span id="progress-text"></span><span class="track"><span class="fill" id="fill"></span></span></span>'+
+      '<button class="nav" id="next">Next →</button>'+
+    '</div>'+
+
+    '<p class="lede">Read the original, then answer the same <strong>'+DIMENSIONS.length+'</strong> questions our automated evaluator scores: <strong>Yes</strong> if the draft passes, <strong>No</strong> if it fails. Give an overall verdict and, most usefully, fix the draft in place so we can see what a good version looks like.</p>'+
+
+    '<div class="compare">'+
+      '<section class="panel orig"><div class="panel-head">Original text<span class="tag">UN source</span></div>'+
+        '<div class="doc">'+escapeHtml(item.original)+'</div></section>'+
+      '<section class="panel draft"><div class="panel-head">AI plain-English draft<span class="tag">'+escapeHtml(VARIANT_LABELS[PRIMARY])+'</span></div>'+
+        '<div class="doc">'+escapeHtml(draftText(item))+'</div></section>'+
+    '</div>'+
+
+    othersHtml+
+
+    '<div class="review panel">'+
+      '<h2>Your review</h2>'+
+      '<div class="dims" id="dims"></div>'+
+      '<div class="field"><div class="field-label">Overall: is this a usable first draft?</div><div class="verdicts" id="verdicts"></div></div>'+
+      '<div class="field"><div class="field-label">Suggested correction <span class="soft">(optional; edit into what it should say, or leave as is)</span></div>'+
+        '<textarea class="correction" id="correction" placeholder="Edit the draft here…"></textarea></div>'+
+      '<div class="field"><div class="field-label">Additional notes / feedback <span class="soft">(optional)</span></div>'+
+        '<textarea id="notes" placeholder="Anything worth flagging, patterns you noticed, etc."></textarea>'+
+        '<p class="hint">Please do not include personal data here.</p></div>'+
+      '<div class="footnav">'+
+        '<button class="nav" id="prev2">← Previous</button>'+
+        '<button class="nav" id="next2">Next →</button>'+
+        '<span class="saved" id="saved">Saved</span>'+
+      '</div>'+
+    '</div>';
+
+  renderDots();
+  renderDims(a);
+  renderVerdicts(a);
+  updateProgress();
+
+  const corr=document.getElementById("correction");
+  corr.value = (a.correction!==null && a.correction!==undefined) ? a.correction : draftText(item);
+  corr.oninput = ()=>{ a.correction=corr.value; persist(); };
+  const notes=document.getElementById("notes");
+  notes.value = a.notes||"";
+  notes.oninput = ()=>{ a.notes=notes.value; persist(); };
+
+  const go=d=>{ const n=current+d; if(n>=0 && n<workingSet.length){ current=n; render(); window.scrollTo(0,0); } };
+  document.getElementById("prev").onclick=()=>go(-1);
+  document.getElementById("next").onclick=()=>go(1);
+  document.getElementById("prev2").onclick=()=>go(-1);
+  document.getElementById("next2").onclick=()=>go(1);
+  document.getElementById("prev").disabled = current===0;
+  document.getElementById("prev2").disabled = current===0;
+  document.getElementById("next").disabled = current===workingSet.length-1;
+  document.getElementById("next2").disabled = current===workingSet.length-1;
+  const sn=document.getElementById("sampleN");
+  if(sn) sn.onchange=()=>{ let v=parseInt(sn.value,10); const Mx=REVIEW_DATA.length; if(isNaN(v)||v<1) v=Mx; if(v>Mx) v=Mx; state.sampleN=(v>=Mx)?null:v; persist(); computeWorkingSet(); current=0; render(); window.scrollTo(0,0); };
+}
+
+function renderDots(){
+  const wrap=document.getElementById("dots"); wrap.innerHTML="";
+  workingSet.forEach((realIdx,pos)=>{
+    const it=REVIEW_DATA[realIdx];
+    const a=state.ann[it.id];
+    const b=document.createElement("button");
+    b.className="dot "+(pos===current?"here ":"")+(a&&a.verdict?verdictClass(a.verdict):"");
+    b.title="Record "+(realIdx+1);
+    b.onclick=()=>{ current=pos; render(); window.scrollTo(0,0); };
+    wrap.appendChild(b);
+  });
+}
+
+function renderDims(a){
+  const wrap=document.getElementById("dims"); wrap.innerHTML="";
+  let lastGroup=null;
+  DIMENSIONS.forEach(dim=>{
+    if(dim.group!==lastGroup){ lastGroup=dim.group;
+      const gh=document.createElement("div"); gh.className="dim-group"; gh.textContent=dim.group; wrap.appendChild(gh); }
+    const cur=a.dims[dim.key];
+    const row=document.createElement("div"); row.className="dim";
+    row.innerHTML='<div class="dim-label"><div class="t">'+escapeHtml(dim.t)+'</div><div class="d">'+escapeHtml(dim.d)+'</div></div>'+
+      '<div class="seg">'+
+        '<button data-val="ok" class="'+(cur==="ok"?"on-good":"")+'">Yes</button>'+
+        '<button data-val="bad" class="'+(cur==="bad"?"on-crit":"")+'">No</button>'+
+      '</div>';
+    const [okB,badB]=row.querySelectorAll(".seg button");
+    okB.onclick=()=>{ a.dims[dim.key]=a.dims[dim.key]==="ok"?undefined:"ok"; persist(); renderDims(a); };
+    badB.onclick=()=>{ a.dims[dim.key]=a.dims[dim.key]==="bad"?undefined:"bad"; persist(); renderDims(a); };
+    wrap.appendChild(row);
+  });
+}
+
+function renderVerdicts(a){
+  const wrap=document.getElementById("verdicts"); wrap.innerHTML="";
+  VERDICTS.forEach(vd=>{
+    const lab=document.createElement("label"); lab.className="verdict"+(a.verdict===vd.v?" sel":""); lab.setAttribute("data-v",vd.v);
+    lab.innerHTML='<span class="sw"></span>'+vd.label+'<input type="radio" name="verdict" '+(a.verdict===vd.v?"checked":"")+'>';
+    lab.querySelector("input").onchange=()=>{ a.verdict=vd.v; persist(); render(); };
+    wrap.appendChild(lab);
+  });
+}
+
+function updateProgress(){
+  const done=workingSet.filter(i=>{ const it=REVIEW_DATA[i]; return state.ann[it.id]&&state.ann[it.id].verdict; }).length;
+  const tot=workingSet.length;
+  const t=document.getElementById("progress-text"); if(t) t.textContent=done+" / "+tot+" reviewed";
+  const f=document.getElementById("fill"); if(f) f.style.width=(tot?done/tot*100:0)+"%";
+}
+
+/* ---- Export ---- */
+function isTouched(a){ if(!a) return false; if(a.verdict) return true; if(a.dims&&Object.keys(a.dims).some(k=>a.dims[k])) return true; if(a.notes) return true; if(a.correction!=null) return true; return false; }
+function buildRecords(){
+  const out=[];
+  REVIEW_DATA.forEach((item,i)=>{
+    const a=state.ann[item.id];
+    if(!isTouched(a)) return;   // only export records this reviewer actually reviewed
+    const human={};
+    DIMENSIONS.forEach(d=>{ const v=a.dims&&a.dims[d.key]; human["human_"+d.key]= v==="ok"?1 : v==="bad"?0 : ""; });
+    const corr=(a.correction!==null&&a.correction!==undefined)?a.correction:"";
+    out.push(Object.assign({ record_index:i+1, reviewed_variant:a.variant||PRIMARY, verdict:a.verdict||"" }, human, {
+      correction_changed: corr!=="" && corr!==draftText(item),
+      suggested_correction:corr, notes:a.notes||"", original:item.original, ai_draft:draftText(item),
+    }));
+  });
+  return out;
+}
+function buildJSON(){
+  const N=sampleSize(), M=REVIEW_DATA.length;
+  return JSON.stringify({
+    sample_size: N>=M ? "all" : N,
+    assigned_records: workingSet.map(i=>i+1),
+    records: buildRecords(),
+  }, null, 2);
+}
+function csvCell(v){ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+function buildCSV(){
+  const rows=buildRecords();
+  const humanCols=DIMENSIONS.map(d=>"human_"+d.key);
+  const cols=["record_index","reviewed_variant","verdict",...humanCols,"correction_changed","suggested_correction","notes","original","ai_draft"];
+  const lines=[cols.join(",")];
+  rows.forEach(r=>{ lines.push(cols.map(c=>csvCell(r[c])).join(",")); });
+  return lines.join("\n");
+}
+let exportFmt="json";
+function refreshExportText(){ document.getElementById("export-text").value = exportFmt==="json"?buildJSON():buildCSV(); }
+function openExport(){ refreshExportText(); document.getElementById("overlay").classList.add("show"); }
+function closeExport(){ document.getElementById("overlay").classList.remove("show"); }
+
+function setBtn(id,txt){ const b=document.getElementById(id); const old=b.textContent; b.textContent=txt; setTimeout(()=>{b.textContent=old;},1400); }
+
+function init(){
+  document.getElementById("export-btn").onclick=openExport;
+  document.getElementById("close-modal").onclick=closeExport;
+  document.getElementById("overlay").onclick=(e)=>{ if(e.target.id==="overlay") closeExport(); };
+  document.querySelectorAll(".tabs button").forEach(b=>{
+    b.onclick=()=>{ document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); exportFmt=b.getAttribute("data-fmt"); refreshExportText(); };
+  });
+  document.getElementById("copy-btn").onclick=()=>{
+    const ta=document.getElementById("export-text"); ta.select();
+    try { navigator.clipboard.writeText(ta.value).then(()=>setBtn("copy-btn","Copied ✓"),()=>{document.execCommand("copy");setBtn("copy-btn","Copied ✓");}); }
+    catch(e){ try{document.execCommand("copy");setBtn("copy-btn","Copied ✓");}catch(e2){setBtn("copy-btn","Select the text & copy");} }
+  };
+  document.getElementById("download-btn").onclick=()=>{
+    const isJson=exportFmt==="json";
+    const blob=new Blob([isJson?buildJSON():buildCSV()],{type:isJson?"application/json":"text/csv"});
+    try { const url=URL.createObjectURL(blob); const link=document.createElement("a");
+      link.href=url; link.download="translation_review."+(isJson?"json":"csv");
+      document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
+    } catch(e){ setBtn("download-btn","Use copy instead"); }
+  };
+  document.addEventListener("keydown",(e)=>{
+    if(e.key==="Escape") closeExport();
+    if(document.querySelector(".overlay.show")) return;
+    if(e.target.tagName==="TEXTAREA"||e.target.tagName==="INPUT") return;
+    if(e.key==="ArrowLeft"&&current>0){ current--; render(); window.scrollTo(0,0); }
+    if(e.key==="ArrowRight"&&current<workingSet.length-1){ current++; render(); window.scrollTo(0,0); }
+  });
+  computeWorkingSet();
+  render();
+}
+init();
+</script>
