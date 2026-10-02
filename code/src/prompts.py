@@ -1,109 +1,73 @@
+from pathlib import Path
+from typing import Optional
+
+from src.definitions_store import DefinitionsStore
 from src.uhri_record import UHRIRecord
 """
-Pkg 3
-Prompt templates for simplifying UHRI texts.
+Pkg 3: Prompt templates for simplifying UHRI texts [last updated 2026-09-18]
+
+Usage:
+    from src.prompts import PROMPTS, DEFAULT_PROMPT, build_prompt
+
+All prompt definitions — the 5 standard templates AND any custom ones added
+via the GUI — live together in one file: prompts.json, next to this module
+(git-tracked, so it's shared with anyone who pulls the repo). An entry's
+`standard: true/false` flag is what tells the two apart, not which file
+it's in — mirrors evaluation.py/metrics.json exactly (see
+definitions_store.py, which both modules share).
+
+PROMPTS is derived from prompts.json at import time (the `standard: true`
+subset, flattened to slug -> template string) — kept in that flat shape
+because build_prompt()/simplify() and every existing caller expect it.
+`date_added` is null for the 5 standard ones (they predate the field) and
+an ISO date for every custom one, same convention as metrics.json.
+
+Resumption:
+    load_custom_prompt_definitions()/save_custom_prompt_definition() (added
+    2026-09-13, reshaped into one unified prompts.json 2026-09-18, delegated
+    to the shared DefinitionsStore 2026-09-18) let the prompt-improvement
+    Streamlit GUI persist a custom prompt's name/template permanently
+    instead of it living only in st.session_state — mirrors evaluation.py's
+    load_custom_metric_definitions()/save_custom_metric_definition() for
+    custom metrics; see definitions_store.py for the shared implementation.
+    save_custom_prompt_definition() always reads and rewrites the *whole*
+    file, never just the custom subset, so saving a new custom prompt can
+    never accidentally drop the standard 5. The generated *rows* for a
+    saved prompt go into the data CSV instead (data/ is gitignored) — see
+    simplification.save_custom_prompt_rows_to_csv().
 """
 
-prompt_felix =  """\
-You are simplifying a {type} from {body} concerning {country} for a non-expert reader.
+# Where ALL prompt definitions live — the 5 standard templates and any
+# custom ones, together. Next to this file (not relative to the cwd),
+# tracked in git so a saved prompt's template is shared with anyone who
+# pulls the repo.
+PROMPTS_PATH = Path(__file__).parent / "prompts.json"
+_prompts_store = DefinitionsStore(PROMPTS_PATH, content_field="template")
 
-GOALS
-- Make the text easier to read using everyday vocabulary and shorter sentences.
-- Preserve every named actor, body, obligation, modal verb, and specific reference exactly.
 
-GUIDELINES
+def load_all_prompt_definitions(path: Optional[Path] = None) -> dict:
+    """Load every prompt definition — standard AND custom, together.
 
-1. Word choice: replace formal/legal vocabulary with everyday equivalents.
-   "is mandated to" -> "is responsible for"
-   "conduct criminal investigations" -> "carry out criminal investigations"
-   "characterised by undue delays" -> "marked by delays that are too long"
+    See DefinitionsStore.load_all() for the full contract; this is a thin
+    wrapper so callers keep using `from src.prompts import
+    load_all_prompt_definitions` rather than reaching into the store
+    directly.
+    """
+    return _prompts_store.load_all(path)
 
-2. Technical UN/human-rights terms: keep the term, add a brief definition in parentheses on first use.
-   "reasonable accommodation" -> "reasonable accommodation (necessary adjustments so persons with disabilities can exercise their rights equally)"
-   "non-refoulement" -> "non-refoulement (the prohibition on returning people to countries where they face serious harm)"
 
-3. Legal and country-specific references: keep the proper name, add a brief explanation in parentheses on first use.
-   "Istanbul Convention" -> "Istanbul Convention (2011 Council of Europe treaty requiring states to prevent violence against women)"
-   "Commonwealth Rent Assistance" -> "Commonwealth Rent Assistance (Australian federal payment to low-income renters)"
-
-4. Sentences: split overly long sentences, but do not fragment into choppy short ones. "John wrote a book. I read that book." is too far.
-
-STRICT PRESERVATION RULES
-- Every named body or actor stays named. Do NOT generalize "the Criminal Investigation Department and the Attorney General's Department" to "the relevant authorities".
-- Modal verbs keep their force: "must" stays "must", not "should". "shall" stays "shall".
-- All conditions, exceptions, and qualifications survive.
-- No new information, interpretations, or context that is not in the original.
-
-Output ONLY the rewritten text. No preamble.
-
-Original text:
-{text}
-
-Simplified version:
-"""
-
-transcribe_litteral = """
-You are a text transcriber. Rewrite the following legal text \
-by only simplifying the vocabulary - keep the original sentence structure and meaning as close as possible.
-Replace complex words with simpler synonyms but maintain the formal tone. 
-Do not summarize, explain, or add anything. Keep it literal.
-
-For additional context, the text is type: {type}, written by {body}, and is concearning {country}.
-
-Original text:
-{text}
-
-Simplified version:
-"""
-
-too_simple_summary = """\
-Please summarise the following {type} from {body} into plain simple English.
-Be sure to use only information from the text.
-The text is about {country}
-
-Original text:
-{text}
-
-Simplified version:
-"""
-
-transcribe_accessible = """
-You are a accessibility converter. Your task is to make the following legal text 
-accessible to someone with limited English. Preserve the original meaning exactly. 
-Use very simple words and short sentences. Keep all the detail. 
-Do not add any information not in the original text.
-
-For additional context, the text is type: {type}, written by {body}, and is concearning {country}.
-
-Original text:
-{text}
-
-Simplified version:
-"""
-
-summarise = """
-You are a legal text simplifier. Rewrite the following legal text \
-into plain, simple English that a general audience can understand. 
-Use common words and short sentences. Keep all key facts and events. 
-Do not add any information not in the original text.
-
-For additional context, the text is type: {type}, written by {body}, and is concearning {country}.
-
-Original text:
-{text}
-
-Simplified version:
-"""
-
+# The subset of prompts.json marked `standard: true` — flattened to
+# slug -> template, which is the shape build_prompt()/simplify() and every
+# existing caller/test expect. A custom (standard: false) prompt in the
+# same file only gets used when generate_new_prompt() is asked to.
 PROMPTS = {
-    "prompt_felix": prompt_felix,
-    "simple_summary": too_simple_summary,
-    "literal_transcribe": transcribe_litteral,
-    "accessible_transcribe": transcribe_accessible,
-    "summarise": summarise,
+    slug: entry["template"]
+    for slug, entry in load_all_prompt_definitions().items()
+    if entry.get("standard")
 }
 
-DEFAULT_PROMPT = prompt_felix
+DEFAULT_PROMPT = PROMPTS["prompt_felix"]
+
 
 def build_prompt(record: UHRIRecord, template: str = DEFAULT_PROMPT) -> str:
     """
@@ -123,3 +87,38 @@ def build_prompt(record: UHRIRecord, template: str = DEFAULT_PROMPT) -> str:
         country=record.country,
         text=record.text,
     )
+
+
+def load_custom_prompt_definitions(path: Optional[Path] = None) -> dict:
+    """Load saved CUSTOM prompt definitions only — the standard 5 excluded.
+
+    "Custom" means anything in prompts.json *not* marked `standard: true` —
+    i.e. whatever's been added via the GUI's "Add a new prompt" form. Use
+    load_all_prompt_definitions() instead if you need the standard ones too.
+    See DefinitionsStore.load_custom() for the full contract.
+    """
+    return _prompts_store.load_custom(path)
+
+
+def save_custom_prompt_definition(
+    slug: str,
+    name: str,
+    template: str,
+    path: Optional[Path] = None,
+    date_added: Optional[str] = None,
+) -> None:
+    """Persist one custom prompt's definition (name + template).
+
+    See DefinitionsStore.save_custom() for the full contract, in particular
+    why this can never accidentally drop the standard 5 sharing the file.
+
+    Args:
+        slug: The prompt's ``prompt`` column value (see text_utils.slugify).
+        name: Human-readable name, as typed in the GUI.
+        template: The prompt template string.
+        path: JSON file to write. Defaults to PROMPTS_PATH.
+        date_added: ISO date string (YYYY-MM-DD). Defaults to today — the
+            normal case, a fresh save from the GUI. Pass this explicitly
+            only to backfill an older entry.
+    """
+    _prompts_store.save_custom(slug, name, template, path, date_added)
