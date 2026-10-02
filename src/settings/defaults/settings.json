@@ -1,0 +1,29 @@
+{
+  "selected_prompts": ["prompt_felix"],
+  "simplification": {
+    "model": "gpt-5.5",
+    "reasoning_effort": "medium",
+    "text_column": null
+  },
+  "dashboard": {
+    "data_path": "data/cleaned.csv",
+    "judge_model": "claude-sonnet-4-5",
+    "n_samples": 2,
+    "auto_format_original": true,
+    "low_variance_threshold": 0.04,
+    "high_variance_threshold": 0.03,
+    "covariance_threshold": 0.8,
+    "default_weight": 1.0,
+    "weights": {
+      "fk_normalized_score": 5.0,
+      "accessible_and_simple_score": 5.0,
+      "plain_vocabulary_score": 5.0,
+      "standalone_comprehension_score": 5.0
+    }
+  },
+  "feedback_form": {
+    "data_path": "data/cleaned.csv",
+    "host": "127.0.0.1",
+    "port": 8010
+  }
+}

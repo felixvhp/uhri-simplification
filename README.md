@@ -1,111 +1,124 @@
-# UHRI Project
+# UHRI Simplification
 
-## Repository Structure
+Turns the legal language of UN human rights recommendations (OHCHR's Universal
+Human Rights Index) into plain English, and provides two tools to check how
+good the result is.
+
+## Repository structure
 
 ```
-uhri-dev/
-├── code/                # Source code and implementation
-│   ├── scripts/            # helper scripts
-│   ├── src/                # source code
-│   ├── tests/              # tests
-├── data/                # Datasets and data resources
-├── docs/                # Documentation
-│   ├── prototypes/         # Protoypes for external presentation
-│   ├── spec/               # Write-up of requirements, specifications, etc.
-└── README.md            
+src/
+├── settings/         the only thing the three tools share
+│   ├── defaults/        metrics.json, prompts.json, settings.json  (tracked)
+│   └── user/            your own overrides, created on first save  (gitignored)
+├── simplification/   input data -> simplified output (library + command line)
+├── dashboard/        evaluation dashboard: LLM judge + Streamlit GUI
+└── feedback_form/    human review form (static page or small server)
+tests/
+data/                 gitignored; holds your input and output files
 ```
 
-## Running Tests
+The three tools never import each other. What one needs to tell another goes
+through the files in `src/settings/` (`tests/test_isolation.py` enforces this),
+and results travel between them as data files in `data/`.
+
+## Setup
 
 ```bash
-cd code
-python -m pytest tests/
-# or run a single file directly:
-python tests/dataloader_test.py
-python tests/test_evaluations.py
+python3 -m venv venv            # Python 3.11+
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # then fill in OPENAI_API_KEY and ANTHROPIC_API_KEY
 ```
 
-## Running the Prompt Improvement GUI
-
-A Streamlit GUI for pkg3's prompt-improvement workflow lives at
-`code/src/prompt_improvement_app.py`. It walks through the same four-step
-report as `code/src/prompt_improvement_workflow.py` — metric variance,
-sanity check, prompt comparison, best-prompt verification — interactively in
-the browser, and additionally lets you tweak metric weights, remove metrics
-from the analysis, and add new LLM-judged metrics on the fly.
+Run everything from the repo root. Tests need no API keys:
 
 ```bash
-cd code
-pip install -r requirements.txt   # first time only — installs streamlit
-streamlit run src/prompt_improvement_app.py
+python -m pytest
 ```
 
-This opens the app at `http://localhost:8501` (Streamlit prints the exact
-URL, and picks another port if that one's busy). It reads
-`data/cleaned.csv` by default — editable in the sidebar to point at a
-different long-format CSV.
+## Settings
 
-Everything in the GUI is local and instant *except* the sidebar's "Add a new
-metric" form: that calls the Anthropic API live, once per row, so it needs
-`ANTHROPIC_API_KEY` set in your environment (or a `.env` file — the code
-loads it via `python-dotenv`) and costs real API credits. The GUI shows a
-cost/row-count warning and requires an explicit confirmation checkbox before
-that button is enabled.
+Each of the three files has a tracked default and an optional personal copy:
 
-A custom metric added this way lives only in the browser session until you
-hit "💾 Save" next to it: that writes its judge question into
-`code/src/metrics.json` (tracked in git — shared with anyone who
-pulls the repo) and its computed scores into the loaded CSV in place
-(`data/` is gitignored, so that part stays local to your machine). After
-saving, it's an ordinary column the next time the CSV loads — the "Add a
-new metric" form also has a "📂 Load a saved metric definition" dropdown to
-reuse a saved judge question without retyping it, e.g. against a new
-dataset.
+| File | Holds |
+|---|---|
+| `metrics.json` | what the LLM judge and human reviewers score |
+| `prompts.json` | the simplification prompt templates |
+| `settings.json` | models, selected prompt(s), data paths, dashboard preferences |
 
-## Documentation Guidelines
+Reading merges `defaults/` with `user/`, your values winning. Saving — from the
+dashboard or with `src.settings.save_*` — only ever writes `user/`, which is
+gitignored. To change what everyone gets, edit the file in `defaults/` and commit.
 
-### Code Files
+## Simplifying data
 
-- Include a header comment with file purpose and key dependencies
-- Document public functions/classes with descriptions, parameters, and return types
-- delete/change comments when updating referenced code
-- for each sub-system, keep a "open issues" list / "next work item" (i.e. the place where the next person should resume working)
+```bash
+python -m src.simplification data/email_recs.xlsx                     # -> data/email_recs.simplified.xlsx
+python -m src.simplification data/email_recs.xlsx -o data/out.json    # formats can differ
+python -m src.simplification in.csv --text-column body --prompt summarise
+```
 
-**Example:**
+From Python:
 
 ```python
-"""
-Pkg #1: Retrieval Implementation [last updated xxx]
+from src.simplification import simplify, simplify_file
 
-Usage: XXX
-
-Open Issues:
-- ...
-
-Resumption:
-- ...
-
-"""
-
-def extract_filter(
-    manual_tag: UHRITag,
-    query: str,
-) -> UHRIFilter:
-    """
-    Extract context tags and information from a user query.
-    
-    Parses the input query string and combines it with manual tags
-    to identify relevant UHRI tags and constraints.
-    
-    Args:
-        manual_tag: UHRITag from hard-coded extraction
-        query: User query string to parse for tags
-        
-    Returns:
-        UHRIFilter object representing extracted tags and information
-    """
+simplify_file("data/email_recs.xlsx", "data/out.csv")
+rows = simplify([{"id": 7, "Text": "The Committee recommends ..."}])   # list of dicts
+df = simplify(my_dataframe, text_column="recommendation")              # DataFrame
+text = simplify("The Committee recommends ...")                        # one string
 ```
 
-### Commit Messages
+- **Formats:** `.xlsx`, `.csv`, `.tsv`, `.json` (a list of objects), `.jsonl`.
+- **Output:** every original column or key is kept, and the simplification is
+  added as `simplified`.
+- **Prompt:** the one selected in the settings (`selected_prompts`). If several
+  are selected you get a warning first, then one column per prompt
+  (`simplified_<prompt>`). The command line asks before continuing; `--yes` skips that.
+- **Text column:** `Text`, `text` or `original_text` is found automatically;
+  otherwise pass `--text-column` / `text_column=`.
+- **Cost:** one OpenAI call per row and prompt. Try `--sample 5` first.
 
-- e.g. `[pkg1] added missing acronyms to vectorization`
+Installed with `pip install .`, the same interface is available as
+`from uhri_simplification.simplification import simplify`.
+
+## Evaluating prompts (dashboard)
+
+The dashboard compares prompts on a results file with one row per text and
+prompt. Produce it with the long layout:
+
+```bash
+python -m src.simplification data/email_recs.xlsx -o data/cleaned.csv --layout long
+streamlit run src/dashboard/app.py
+```
+
+In the dashboard you can:
+
+- score the outputs with the LLM judge ("Run missing metrics" — live Anthropic calls, asks first);
+- add a metric, weight metrics, and compare prompts across five report tabs;
+- add a prompt and choose which prompt(s) the simplification step uses next;
+- save all of that to your user settings.
+
+A new prompt has no outputs until you rerun the simplification command above.
+`python -m src.dashboard.workflow` prints the same report in the terminal.
+
+## Collecting human feedback (feedback form)
+
+Reviewers score each simplification on the same metrics the judge uses.
+
+```bash
+python -m src.feedback_form.make_data --sample 80   # pick records from data/cleaned.csv
+python -m src.feedback_form.serve                   # http://127.0.0.1:8010, stores submissions
+python -m src.feedback_form.build                   # or: one self-contained HTML file to send around
+```
+
+Submissions land in `src/feedback_form/exports/` (gitignored).
+
+## Conventions
+
+- Commit messages: `[pkg3] short description`.
+- Each code file starts with a docstring: purpose and last-updated date, usage,
+  open issues, and where the next person should resume.
+- Public functions have Google-style docstrings (Args / Returns).
+- Update or delete comments when the code they describe changes.

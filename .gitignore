@@ -25,5 +25,13 @@ venv311/
 .pytest_cache/
 .mypy_cache/
 
-# reviewer submissions collected by review/serve_review.py (data, not source)
-code/review/exports/
+# reviewer submissions collected by src/feedback_form/serve.py (data, not source)
+src/feedback_form/exports/
+
+# personal metrics/prompts/settings saved by the tools (defaults/ is the tracked copy)
+src/settings/user/*
+!src/settings/user/.gitkeep
+
+# Packaging
+build/
+*.egg-info/

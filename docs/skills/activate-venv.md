@@ -12,7 +12,7 @@ checkout — it needs Python 3.11 or newer (the pinned pandas/numpy require it):
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r code/requirements.txt
+pip install -r requirements.txt
 ```
 
 ## Commands
@@ -24,16 +24,15 @@ source venv/bin/activate
 
 **Run tests:**
 ```bash
-source venv/bin/activate && cd code && python -m pytest tests/ -v
+source venv/bin/activate && python -m pytest -v
 ```
 
 **Run a script:**
 ```bash
-source venv/bin/activate && cd code && python src/some_script.py
+source venv/bin/activate && python -m src.simplification --help
 ```
 
 ## Notes
 - A venv breaks if its folder (or the repo) is moved: `activate`, `pip` and
   `pytest` keep pointing at the old path. Delete `venv/` and recreate it.
-- Tests must be run from `code/` as the working directory so that `src.*` imports
-  resolve correctly.
+- Run everything from the repo root so that `src.*` imports resolve.

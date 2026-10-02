@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uhri-simplification"
+version = "0.1.0"
+description = "Plain-English simplification of UN human rights recommendations, with tools to evaluate and review the output"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "openpyxl",
+    "openai",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+# The evaluation dashboard (LLM judge + Streamlit GUI). The feedback form needs nothing extra.
+dashboard = ["anthropic", "textstat", "streamlit", "altair"]
+dev = ["pytest"]
+
+# `pip install .` exposes src/ as the package `uhri_simplification`:
+#     from uhri_simplification.simplification import simplify_file
+# Inside a checkout the same code is importable as `src` from the repo root.
+[tool.setuptools]
+packages = [
+    "uhri_simplification",
+    "uhri_simplification.settings",
+    "uhri_simplification.simplification",
+    "uhri_simplification.dashboard",
+    "uhri_simplification.feedback_form",
+]
+
+[tool.setuptools.package-dir]
+uhri_simplification = "src"
+
+[tool.setuptools.package-data]
+"uhri_simplification.settings" = ["defaults/*.json"]
+"uhri_simplification.feedback_form" = ["*.html", "*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
