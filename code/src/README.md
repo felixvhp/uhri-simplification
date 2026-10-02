@@ -142,30 +142,31 @@ possible — with a backup taken first.
    `"<dim>__score"` (double underscore), but `_build_row()` flattens
    `score_simplification()`'s `"__"` to `"_"` — so those weights would
    have silently matched no column and done nothing.
-8. **Reconciled "what the GUI shows" with "what metrics.json defines"**:
-   the GUI's metric list used to be just `get_score_columns(df)` — every
-   `*_score` column the loaded CSV happened to have, regardless of whether
-   `metrics.json` still considered it current. After the 5->9 dimension
-   switch above, that meant the GUI kept showing the 5 retired dimensions
-   forever on any CSV computed before the switch (orphaned, no
-   description available), while a freshly re-judged CSV wouldn't show
-   them at all — two different "truths" depending on which file happened
-   to be loaded. Fixed by:
+8. **Restored the 5 retired dimensions into `metrics.json` instead of
+   leaving them deleted**: after the 5->9 switch above, `metrics.json` only
+   had the 9 new entries — the original 5 (`content_preserved`,
+   `actors_preserved`, `no_meaning_change`, `no_hallucination`,
+   `accessible_and_simple`) were gone outright, so any already-computed CSV
+   column for them had no description available in the GUI anymore ("View
+   metric description" showed "_No description available_"). Fixed by:
    - Added `"active": true/false` to every `metrics.json`/`prompts.json`
      entry (`DefinitionsStore.load_active()`/`set_active()`). An entry is
-     never deleted to retire it — `active: false` keeps its description
-     and history. Restored the original 5 dimensions into `metrics.json`
-     (recovered via git history) as `active: false`, rather than leaving
-     them gone for good.
+     never deleted to retire it anymore — `active: false` keeps its
+     description and history, and it can be reactivated later. Restored
+     the 5 dimensions (recovered via git history) as `active: false`.
    - `EVAL_DIMENSIONS`/`PROMPTS` now filter on `standard AND active`
-     instead of just `standard`.
-   - The GUI's metric list (`_get_available_metric_columns()` in
-     `prompt_improvement_app.py`) now reconciles the two: a column
-     `metrics.json` governs must also be `active` there to be offered; a
-     column it doesn't govern at all (e.g. `fk_normalized_score`, which is
-     locally computed, not LLM-judged) is always offered, same as before.
-     Both "what gets judged on new data" and "what the GUI offers" now
-     read the exact same `active` flag off the exact same file.
+     instead of just `standard` — so a retired dimension stops being
+     judged on any *new* simplification pass, but its definition stays
+     documented and its old scores stay fully visible: `active` only
+     gates EVAL_DIMENSIONS/PROMPTS (future judging), not the GUI. The
+     GUI's metric list is still plain `get_score_columns(df)` — whatever
+     `*_score` columns a CSV actually has, it shows, same as always —
+     and `metric_descriptions` is still built from *every* metrics.json
+     entry regardless of `active`, so a retired metric's judge question
+     and date_added still render correctly when you inspect it.
+   - `build_review_tool.py` (review-tool calibration axes) reads the same
+     `standard AND active` filter directly from `metrics.json`, so it
+     can't silently drift from `EVAL_DIMENSIONS` either.
 
 Every step was verified with `python -m py_compile`, a full headless
 `AppTest` boot (zero exceptions), targeted functional checks (remove

@@ -31,11 +31,12 @@ Resumption:
     when the judge was rewritten to the current 9 fine-grained ones) is
     never deleted from metrics.json — it's marked `"active": false`
     instead, via DefinitionsStore.set_active(). EVAL_DIMENSIONS filters to
-    `standard AND active`, and the GUI's metric list (see
-    prompt_improvement_app.py's _get_available_metric_columns()) filters on
-    that exact same `active` flag read from this same file, so "what the
-    judge scores" and "what the GUI shows as available" can't silently
-    drift apart from each other the way they once did.
+    `standard AND active`, so a retired dimension stops being judged on any
+    *new* simplification. It keeps its description/date_added in
+    metrics.json either way, and an already-computed CSV column for it
+    keeps showing up in the GUI exactly like any other metric (the GUI's
+    metric list is still just get_score_columns(df) — `active` only gates
+    EVAL_DIMENSIONS, not what existing data is viewable/selectable).
 
     evaluate_new_metric() (added 2026-09-13) lets a caller — the
     prompt-improvement Streamlit GUI, in particular — judge one ad-hoc
