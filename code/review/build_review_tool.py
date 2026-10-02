@@ -76,7 +76,7 @@ def load_eval_dimensions() -> dict:
 
 
 def build_axes() -> list[dict]:
-    """The review axes: standard metrics joined with their labels and groups.
+    """The review axes: active metrics joined with their labels and groups.
 
     Shared by main() (baked into the standalone page) and serve_review.py's
     /api/axes (served live), so both delivery modes show identical questions.
