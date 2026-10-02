@@ -881,6 +881,10 @@ def render_verify_best_prompt_tab(
         st.info("Open the **Prompt Comparison** tab first to rank prompts.")
         return
 
+    # Same pattern as the Sanity Check tab: verify_best_prompt() draws a
+    # fresh random sample on every call, so the button just needs to trigger
+    # a rerun.
+    st.button("🔀 Resample", key="resample_verify_best_prompt")
     result = verify_best_prompt(df, prompt_stats, score_columns, n_samples=n_samples, verbose=False)
     st.metric("Best prompt", result["best_prompt"], f"mean score {result['mean_score']:.3f}")
     st.write("Read the outputs below — does this look like good simplification?")

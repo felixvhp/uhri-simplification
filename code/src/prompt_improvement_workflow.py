@@ -365,7 +365,7 @@ def verify_best_prompt(
     reason_cols = [c for c in df.columns if c.endswith("_reason")]
     subset = df[df["prompt"] == best]
     display_cols = ["original_text", "transcribed_text"] + score_columns + reason_cols
-    sample = subset[display_cols].sample(min(n_samples, len(subset)), random_state=7)
+    sample = subset[display_cols].sample(min(n_samples, len(subset)))
 
     if verbose:
         print(f"Best prompt: '{best}'  (mean={mean:.3f})")
