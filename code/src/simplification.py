@@ -1,5 +1,5 @@
 """
-Pkg 3: Natural language translation [last updated 2026-09-13]
+Pkg 3: Natural language translation
 
 The goal of this document is to test out using LLMs for simplifying the legalese texts.
 Motivation:
@@ -24,28 +24,29 @@ Open issues:
     Spending some time on choosing the best model might be wise.
 
 Resumption:
-    generate_new_prompt() (added 2026-09-13) lets a caller — the
-    prompt-improvement Streamlit GUI, in particular — try a brand-new prompt
-    template against the existing dataset without a full UHRIRecord (a
-    long-format CSV row only has flattened text, no country/body/type). See
-    its docstring for what that costs in fidelity.
+    generate_new_prompt() lets a caller — the prompt-improvement Streamlit
+    GUI, in particular — try a brand-new prompt template against the
+    existing dataset without a full UHRIRecord (a long-format CSV row only
+    has flattened text, no country/body/type). See its docstring for what
+    that costs in fidelity.
 
-    save_custom_prompt_rows_to_csv() (added 2026-09-13) lets the GUI persist
-    a custom prompt's generated rows permanently instead of them living only
-    in st.session_state — the prompt's name/template itself is saved
+    save_custom_prompt_rows_to_csv() lets the GUI persist a custom prompt's
+    generated rows permanently instead of them living only in
+    st.session_state — the prompt's name/template itself is saved
     separately, via prompts.save_custom_prompt_definition() (git-tracked
-    custom_prompts.json next to prompts.py), mirroring how a custom metric's
+    prompts.json next to prompts.py), mirroring how a custom metric's
     definition/scores are split across evaluation.py's two save functions.
 """
 
 import random
+from typing import Optional
 
 import pandas as pd
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from src.Dataloader import load_records
-from src.evaluation import readability, score_simplification
+from src.evaluation import readability, score_simplification, active_metric_definitions
 from src.prompt_improvement_workflow import normalise_fk_grade
 from src.prompts import PROMPTS, DEFAULT_PROMPT, build_prompt
 from src.text_utils import slugify
@@ -149,6 +150,7 @@ def generate_new_prompt(
     template: str,
     model: str = MODEL,
     on_progress=None,
+    dimensions: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Try a new prompt template against every unique text in a long-format DataFrame.
 
@@ -157,9 +159,9 @@ def generate_new_prompt(
     only once here — not once per existing row — to avoid redundant calls.
 
     Each unique text costs two live API calls: one to OpenAI (simplify_text,
-    this module) and one to Anthropic (score_simplification, evaluation.py,
-    scoring the standard EVAL_DIMENSIONS). Intended for interactive use
-    (the GUI's "add a prompt" form), not a hot loop.
+    this module) and one to Anthropic (score_simplification, evaluation.py).
+    Intended for interactive use (the GUI's "add a prompt" form), not a hot
+    loop.
 
     Args:
         df: Long-format DataFrame with an ``original_text`` column.
@@ -172,16 +174,24 @@ def generate_new_prompt(
         model: OpenAI model ID for simplification.
         on_progress: Optional ``callback(done: int, total: int)``, one call
             per unique text. Called with (0, total) before the first text.
+        dimensions: Mapping of dimension name to judge question, passed
+            straight through to score_simplification() for every generated
+            row. Defaults to active_metric_definitions() (every
+            currently-active metric) if not given — the GUI passes whatever
+            is currently selected in its "Active metrics" dropdown instead,
+            so judging here never silently covers more than what the user
+            is actually looking at.
 
     Returns:
         A new DataFrame: df's rows plus one new row per unique original_text
         (``prompt`` set to the slug), with ``fk_normalized_score`` recomputed
         across the combined set — it's dataset-relative (see
         normalise_fk_grade), so adding rows shifts every row's value, not
-        just the new ones. Any metric column df has that isn't part of the
-        standard EVAL_DIMENSIONS (e.g. a custom metric added via the GUI's
-        "add a metric" form) is NOT populated for the new rows.
+        just the new ones. Any metric column df has that isn't part of
+        ``dimensions`` (e.g. a custom metric added via the GUI's "add a
+        metric" form) is NOT populated for the new rows.
     """
+    dimensions = dimensions if dimensions is not None else active_metric_definitions()
     slug = slugify(name)
     unique_texts = df["original_text"].drop_duplicates().tolist()
     total = len(unique_texts)
@@ -193,7 +203,7 @@ def generate_new_prompt(
     for i, text in enumerate(unique_texts, 1):
         conversion = simplify_text(text, template, model=model)
         orig_read = readability(text)
-        metrics = score_simplification(text, conversion, orig_read)
+        metrics = score_simplification(text, conversion, orig_read, dimensions)
         new_rows.append(_build_row(text, slug, conversion, metrics))
 
         if on_progress:
@@ -249,12 +259,17 @@ def select_records(records, sample_size=SAMPLE_SIZE, seed=RANDOM_SEED):
     return random.Random(seed).sample(records, sample_size)
 
 
-def run_experiment(records, prompts=PROMPTS, model=MODEL):
+def run_experiment(records, prompts=PROMPTS, model=MODEL, dimensions: Optional[dict] = None):
     """
     Run every prompt on every record and return long rows.
 
-    Generates one row per (record, prompt) pair, with each metric as its own column (pivoted columns)
+    Generates one row per (record, prompt) pair, with each metric as its own
+    column (pivoted columns). ``dimensions`` is passed straight through to
+    score_simplification() — defaults to active_metric_definitions() (every
+    currently-active metric) for this CLI batch pipeline, since there's no
+    interactive selection to draw from here.
     """
+    dimensions = dimensions if dimensions is not None else active_metric_definitions()
     rows = []
     for record in records:
         print(f"\n{'=' * 60}")
@@ -265,7 +280,7 @@ def run_experiment(records, prompts=PROMPTS, model=MODEL):
             conversion = simplify(record, model=model, template=template)
             print(f"  Finished simplifying with {name}")
 
-            metrics = score_simplification(record, conversion, orig_read)
+            metrics = score_simplification(record, conversion, orig_read, dimensions)
             print(f"  -> eval: {metrics}")
 
             rows.append(_build_row(record.text, name, conversion, metrics))
@@ -293,11 +308,7 @@ if __name__ == "__main__":
         rows = run_experiment(sample)
         # One row per (text, prompt), each metric its own column. Same
         # normalise_fk_grade() used everywhere else in pkg3 (the GUI,
-        # prompt_improvement_workflow.py, generate_new_prompt() above) —
-        # there used to be a separate add_fk_normalized_score() here doing
-        # the identical min-max math on a list of dicts instead of a
-        # DataFrame; building the DataFrame a few lines earlier instead
-        # removed that duplicate.
+        # prompt_improvement_workflow.py, generate_new_prompt() above).
         df = normalise_fk_grade(pd.DataFrame(rows))
         df.to_csv(OUTPUT_PATH, index=False)
 

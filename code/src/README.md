@@ -143,30 +143,128 @@ possible — with a backup taken first.
    `score_simplification()`'s `"__"` to `"_"` — so those weights would
    have silently matched no column and done nothing.
 8. **Restored the 5 retired dimensions into `metrics.json` instead of
-   leaving them deleted**: after the 5->9 switch above, `metrics.json` only
-   had the 9 new entries — the original 5 (`content_preserved`,
-   `actors_preserved`, `no_meaning_change`, `no_hallucination`,
-   `accessible_and_simple`) were gone outright, so any already-computed CSV
-   column for them had no description available in the GUI anymore ("View
-   metric description" showed "_No description available_"). Fixed by:
+   leaving them deleted, and made `metrics.json` the GUI's ground truth**:
+   after the 5->9 switch above, `metrics.json` only had the 9 new entries —
+   the original 5 (`content_preserved`, `actors_preserved`,
+   `no_meaning_change`, `no_hallucination`, `accessible_and_simple`) were
+   gone outright. Separately, the GUI's metric list was discovered purely
+   by sniffing which `*_score` columns a loaded CSV happened to have — so a
+   metric could exist in `metrics.json` with zero connection to what the
+   GUI actually showed for any given file (the 9 new dimensions were
+   invisible on any CSV not yet re-judged; the 5 retired ones, if a column
+   of theirs no longer matched anything current, had nowhere to pull a
+   description from). Fixed as one piece:
    - Added `"active": true/false` to every `metrics.json`/`prompts.json`
-     entry (`DefinitionsStore.load_active()`/`set_active()`). An entry is
-     never deleted to retire it anymore — `active: false` keeps its
-     description and history, and it can be reactivated later. Restored
-     the 5 dimensions (recovered via git history) as `active: false`.
-   - `EVAL_DIMENSIONS`/`PROMPTS` now filter on `standard AND active`
-     instead of just `standard` — so a retired dimension stops being
-     judged on any *new* simplification pass, but its definition stays
-     documented and its old scores stay fully visible: `active` only
-     gates EVAL_DIMENSIONS/PROMPTS (future judging), not the GUI. The
-     GUI's metric list is still plain `get_score_columns(df)` — whatever
-     `*_score` columns a CSV actually has, it shows, same as always —
-     and `metric_descriptions` is still built from *every* metrics.json
-     entry regardless of `active`, so a retired metric's judge question
-     and date_added still render correctly when you inspect it.
+     entry (`DefinitionsStore.set_active()`). An entry is never deleted to
+     retire it anymore — `active: false` keeps its description and
+     history, and it can be reactivated later. Restored the 5 dimensions
+     (recovered via git history) as `active: false`. `EVAL_DIMENSIONS`/
+     `PROMPTS` filter on `standard AND active` (inline — there's no
+     `load_active()`; "active" means something slightly different to each
+     caller, so each filters it themselves), so a retired dimension stops
+     being judged on any *new* simplification pass but keeps its
+     definition and old scores.
+   - `prompt_improvement_app.py`'s `main()` now seeds an empty (NaN) column
+     for every *active* `metrics.json` entry a loaded CSV doesn't already
+     have — before computing `all_metrics` via the same
+     `get_score_columns(df)` as always. That one seeding step is what makes
+     `metrics.json` the actual source of truth: every active metric is
+     guaranteed a slot (new, not-yet-judged ones included) rather than
+     depending on some CSV happening to already have the column; a retired
+     metric is deliberately **not** seeded, so it only appears when a CSV
+     already has real historical data for it, never as a phantom empty
+     column. A column `metrics.json` doesn't govern at all
+     (`fk_normalized_score`) is untouched and still just flows through
+     `get_score_columns(df)`.
+   - `metric_coverage` (judged-row-count per active metric) drives a
+     "⚠️ N/total judged" label in the metrics dropdown
+     (`_metric_option_label`, via `st.multiselect`'s `format_func` — the
+     selection value itself is unaffected, only the displayed text) and a
+     "⚠️ N metric(s) not fully judged" expander
+     (`_render_run_missing_metrics_section`) with a cost-gated "🧮 Run
+     missing metrics over full dataset" button. It calls the new
+     `evaluate_missing_dimensions()` (evaluation.py): one Anthropic call
+     per row that still has *any* gap, covering whichever of the
+     incomplete metrics that row is missing — not one call per metric — so
+     catching a CSV up after a judge-prompt rewrite, or computing a
+     metrics.json entry for the first time, costs exactly what's actually
+     missing and nothing for rows already judged.
    - `build_review_tool.py` (review-tool calibration axes) reads the same
      `standard AND active` filter directly from `metrics.json`, so it
      can't silently drift from `EVAL_DIMENSIONS` either.
+9. **Shrunk `definitions_store.py`**: removed `load_active()` (and the
+   `load_active_metric_definitions()`/`load_active_prompt_definitions()`
+   wrappers around it) — it was only ever used by the GUI metric-list
+   filtering from item 8's first draft, which got reverted. `active`
+   filtering now happens inline at each of the 2-3 places that actually
+   need it (`EVAL_DIMENSIONS`, `PROMPTS`, the coverage logic above), each
+   with its own one-line condition, rather than a shared method guessing a
+   meaning of "active" that didn't actually fit every caller the same way.
+   Kept `set_active()`/`set_metric_active()`/`set_prompt_active()` (the
+   real retire-don't-delete mechanism) and `load_custom()` (backs a real
+   GUI feature — the "load a saved definition" dropdown — and a lot of
+   existing tests).
+10. **Sampling for every live LLM action**: "Run missing metrics", "Add a
+    new metric", and "Add a new prompt" all used to unconditionally run
+    over the *entire* dataset. Fine for a 43-record file; not once the
+    dataset is much larger. Added a shared `_render_sample_controls()` —
+    a slider (default: everything, so nothing changes unless you touch
+    it) plus a "🎲" button that picks a new random subset — used by all
+    three:
+    - "Run missing metrics" samples from whichever rows actually have a
+      gap (not from the whole dataset, so the slider's range is exactly
+      "how many of the *missing* ones to do right now").
+    - "Add a new metric" now calls `evaluate_missing_dimensions()` (a
+      single-dimension call, as if the metric were a standard one with
+      100% of rows missing) instead of the old `evaluate_new_metric()`,
+      which is now dead code and was removed along with its tests.
+      Judging a sample leaves the rest of the rows `NaN` — exactly the
+      partial-coverage shape item 8 already renders as "⚠️ N/total judged"
+      and can finish later via "Run missing metrics", so sampling here
+      needed no new machinery, just reusing what already existed.
+    - "Add a new prompt" samples which *unique texts* to generate+judge;
+      a prompt with fewer rows than the others is already a normal state
+      (same as deselecting a prompt), so no new machinery was needed there
+      either.
+    `evaluate_missing_dimensions()` gained a `rows` parameter (defaults to
+    every row, so existing callers/tests are unaffected) to make all of
+    this possible: restrict which row labels are even considered,
+    independent of which ones currently have gaps.
+
+11. **Human-readable metric names everywhere, instead of raw `*_score`
+    columns**: the GUI used to show technical column names like
+    `obligations_complete_score` verbatim in the metrics dropdown, weight
+    sliders, variance chart, sample views, and "Run missing metrics"
+    listing. Fixed by actually using `metrics.json`'s existing `"name"`
+    field (previously left equal to the slug for every standard entry —
+    only a custom metric's typed name ever differed) as the single source
+    of display text, via a new `_build_metric_names()` that maps each
+    `"_score"` column to its `metrics.json` name (reusing the same labels
+    `build_review_tool.py` already used, for consistency — "Obligation
+    strength" for `deontic_force`, "Legal terms kept" for `terms_of_art`,
+    etc.) or a generic "Underscores -> Title Case" fallback for a column
+    `metrics.json` doesn't govern (`fk_normalized_score`). The real column
+    name is still what's selected/keyed everywhere downstream — only the
+    displayed text changed, via `format_func` on the relevant
+    `st.multiselect`/`st.slider`/`st.selectbox` calls.
+12. **New "Metric Covariance" tab**: two metrics that correlate almost
+    perfectly add little beyond one of them — same idea as low variance,
+    but about a *pair*. `check_metric_covariance()`
+    (prompt_improvement_workflow.py) computes pairwise correlation
+    (`df[score_columns].corr()`, not raw covariance — covariance's
+    magnitude depends on each metric's own scale/variance, so it can't be
+    compared against one fixed threshold across different pairs the way a
+    value in [-1, 1] can) and flags any pair above a tunable threshold
+    (`HIGH_COVARIANCE_THRESHOLD = 0.8` by default); the GUI renders the
+    full matrix plus a remove-either-one button per flagged pair.
+13. **Low-variance warnings show the metric's description, not sample
+    rows**: the Metric Variance tab's flagged-metric expanders used to
+    repeat the same sample-row view the Sanity Check tab already exists
+    for. Now they show the judge question itself (from
+    `metric_descriptions`, already built in `main()`) plus a one-line
+    pointer to Sanity Check for examples — less redundant, and the actual
+    judge question is arguably more useful for deciding whether to remove
+    a metric than a couple of sample rows were.
 
 Every step was verified with `python -m py_compile`, a full headless
 `AppTest` boot (zero exceptions), targeted functional checks (remove
@@ -180,10 +278,55 @@ cd code
 python -m pytest tests/ -q
 ```
 
-As of this session: 75 passed, 8 pre-existing failures — all
+As of this session: 104 passed, 5 pre-existing failures — all
 `FileNotFoundError` on local data files that aren't in this checkout
 (`data/search-*.xlsx` etc.), confirmed present before any of this
-session's changes and unrelated to them.
+session's changes and unrelated to them. (A teammate's concurrent fix
+during this session resolved 3 more pre-existing `compare_prompts`
+failures that used to bring this to 8.)
+
+### Architecture change: no more "standard" metrics, no more automatic judging
+
+Two related decisions changed how `metrics.json` and judging work:
+
+1. **`metrics.json` no longer has a `standard` field.** Every metric is
+   just a metric — the only thing that distinguishes them is `active`
+   (currently judged vs. retired, see item 8 above). `date_added` is also
+   gone from both `metrics.json` and `prompts.json` — it only ever drove
+   one GUI caption, and git history already answers "when was this added"
+   more reliably than a field that has to be kept in sync by hand.
+   `prompts.json` is unaffected — `standard` still means something there
+   (a prompt is a thing being *tried*, so "was this curated vs. typed into
+   the GUI" is still meaningful), so `DefinitionsStore` gained an
+   `include_standard` flag: `True` (default) for prompts.json, `False` for
+   metrics.json.
+2. **Nothing judges automatically anymore.** `evaluate()`/
+   `build_eval_prompt()`/`score_simplification()` no longer have an
+   implicit "judge everything active" default — `dimensions` is now a
+   required argument everywhere in evaluation.py; there is no fallback
+   inside the library. `active_metric_definitions()` still exists as a
+   plain, explicit way to ask for "every currently-active metric" — but
+   calling it is now always something a *caller* opts into, never
+   something that happens on its own:
+   - The GUI's "Run missing metrics" and "Add a new metric" were already
+     explicit (unaffected).
+   - The GUI's "Add a new prompt" now builds its `dimensions` from exactly
+     what's ticked in the sidebar's "Active metrics" dropdown at the
+     moment you press "Generate prompt" — not "every active metric", so
+     judging here can never silently cover more than what you're actually
+     looking at. The button disables itself if that selection is empty.
+   - `simplification.py`'s CLI batch pipeline (`run_experiment()`,
+     `generate_new_prompt()` called without a GUI) still defaults to
+     `active_metric_definitions()` when no `dimensions` is given, since
+     there's no interactive selection to draw from there — but that
+     default now lives as an explicit line in `simplification.py`, not
+     hidden inside `evaluate()`.
+   - `build_review_tool.py` (the separate human-calibration tool) now
+     reads metrics.json's `active` flag directly (no more `standard`
+     check) — it picked up 2 more axes this change (the former "custom"
+     metrics `absolute_accessible`/`actors_with_context`), since there's
+     no more "official battery vs. experiment" distinction to exclude
+     them by.
 
 For GUI changes, there's no dedicated Streamlit test file yet — verify by
 booting headlessly:
@@ -199,11 +342,13 @@ assert not at.exception
 
 - `data/cleaned.csv` (the GUI's default CSV path) still only has the
   *retired* 5 dimensions' score columns — it predates the 9-dimension
-  judge and hasn't been re-run against it. A 9-record sample pass has
-  been run against `data/email_recs.xlsx` and saved to
-  `data/cleaned_sample10.csv` (point the GUI's sidebar CSV path there to
-  see the new dimensions live); re-running the full pass over
-  `data/cleaned.csv` is still outstanding.
+  judge and hasn't been re-run against it. This is no longer invisible,
+  though: opening the GUI on it now shows all 9 active dimensions flagged
+  "⚠️ 0/N judged" with a "🧮 Run missing metrics over full dataset" button
+  right there to fix it (costs real API credits — see item 8 above). A
+  9-record sample pass already exists at `data/cleaned_sample10.csv` if
+  you want to see the new dimensions live without spending on the full
+  43-record file.
 - `_render_save_metrics_section`/`_render_save_prompts_section` (GUI)
   look like another mergeable pair, but their underlying save-function
   signatures differ more than the other merged pairs did — flagged, not
@@ -212,3 +357,14 @@ assert not at.exception
   section predates the `metrics.json`/`prompts.json` unification and
   still mentions `code/src/custom_metrics.json`, which no longer exists —
   worth updating there too.
+- Saving a pending custom prompt appends rows, changing the CSV's row
+  count — which retires any *other* still-unsaved custom metric or prompt
+  (their stored base row count no longer matches). Saving a metric only
+  adds columns, with no such side effect. Save one pending item at a time
+  if you have several, to be safe.
+- Settings only reliably auto-load for whatever CSV is open when the
+  session starts — typing a *different* CSV path mid-session doesn't
+  re-seed `active_metrics`/weights/thresholds/etc. from that file's own
+  sidecar (pre-existing behavior, not new). Properly fixing it means
+  detecting a data_path change and re-running every seeding step; worth
+  doing if multi-CSV-per-session becomes a real workflow.

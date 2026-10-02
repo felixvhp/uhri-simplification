@@ -45,15 +45,16 @@ def load_records(path: Union[str,Path]) -> list[UHRIRecord]:
     else:
         raise ValueError("unsupported type")
  
-    records = []
-    for _, row in df.iterrows():
-        records.append(UHRIRecord(
+    records = [
+        UHRIRecord(
             annotation_id=row.get("OHCHR Annotation Id", ""),
             text=row.get("Text", ""),
             country=row.get("Countries Concerned").strip().lstrip("- "),
             recommending_body=row.get("Reccomending Body").strip().lstrip("- "),
             type=row.get("Type").strip().lstrip("- "),
-        ))
- 
+        )
+        for _, row in df.iterrows()
+    ]
+
     print(f"Loaded {len(records)} records from {path.name}")
     return records

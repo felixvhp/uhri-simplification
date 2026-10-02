@@ -16,51 +16,53 @@ Open Issues:
     - smaller models instead one big model
 
 Resumption:
-    All metric definitions — standard ones AND any custom ones added via
-    the GUI — live together in one file: metrics.json, next to this module
-    (git-tracked, so it's shared with anyone who pulls the repo). An
-    entry's `standard: true/false` flag is what tells the two apart, not
-    which file it's in. `date_added` is null for entries that predate the
-    field and an ISO date for every one added since. EVAL_DIMENSIONS is
-    derived from the file at import time (see load_all_metric_definitions())
-    and must stay in sync with the JSON keys in EVAL_PROMPT — if you add a
-    standard dimension, add it to metrics.json with `standard: true` and
-    update EVAL_PROMPT here.
+    Every metric definition — the ones judged by default and any added via
+    the GUI — lives in one file: metrics.json, next to this module
+    (git-tracked, so it's shared with anyone who pulls the repo). There's no
+    "standard vs custom" flag: every entry is just a metric, told apart only
+    by its `active: true/false` flag (see DefinitionsStore for the full
+    shape). active_metric_definitions() reads the file fresh on every call
+    (never cached), flattened to slug -> description — this is what
+    evaluate()/score_simplification() judge by default when no explicit
+    `dimensions` is given. Its JSON keys must stay in sync with EVAL_PROMPT
+    — if you add a metric meant to be judged by default, add it to
+    metrics.json and make sure EVAL_PROMPT still makes sense for it.
 
-    A dimension retired from the standard set (e.g. the original 5, retired
-    when the judge was rewritten to the current 9 fine-grained ones) is
-    never deleted from metrics.json — it's marked `"active": false`
-    instead, via DefinitionsStore.set_active(). EVAL_DIMENSIONS filters to
-    `standard AND active`, so a retired dimension stops being judged on any
-    *new* simplification. It keeps its description/date_added in
-    metrics.json either way, and an already-computed CSV column for it
-    keeps showing up in the GUI exactly like any other metric (the GUI's
-    metric list is still just get_score_columns(df) — `active` only gates
-    EVAL_DIMENSIONS, not what existing data is viewable/selectable).
+    Retiring a metric (`set_metric_active(slug, False)`) never deletes it:
+    its description survives, it stops being judged on any *new*
+    simplification, and an already-computed CSV column for it still
+    displays normally in the GUI. metrics.json is the GUI's ground truth
+    for which metrics exist at all — the GUI seeds an empty column for
+    every *active* entry a loaded CSV doesn't already have, but never does
+    that for a retired one, which only reappears if the CSV already has
+    real data for it.
 
-    evaluate_new_metric() (added 2026-09-13) lets a caller — the
-    prompt-improvement Streamlit GUI, in particular — judge one ad-hoc
-    dimension across a whole long-format DataFrame without touching
-    EVAL_DIMENSIONS. It reuses evaluate()/build_eval_prompt() by passing a
-    one-entry `dimensions` dict, so the standard five and a custom one share
-    the same judge machinery and never drift apart.
+    A caller that wants something other than "every currently active
+    metric" — e.g. the GUI threading through whatever's currently toggled
+    on in its own "Active metrics" selection — builds its own `dimensions`
+    dict and passes it explicitly; active_metric_definitions() is only the
+    zero-config fallback for a caller (the CLI script, in particular) that
+    has no more specific selection of its own.
 
-    load_all_metric_definitions()/load_custom_metric_definitions()/
-    save_custom_metric_definition() (added 2026-09-13, reshaped into one
-    unified metrics.json 2026-09-18, delegated to the shared
-    DefinitionsStore 2026-09-18) let the GUI persist a custom metric
-    permanently instead of it living only in st.session_state: the
-    definition (name + judge question + date_added) is merged into
-    metrics.json alongside the standard 5 — save_custom_metric_definition()
-    always reads and rewrites the *whole* file, never just the custom
-    subset, so saving a new custom metric can never accidentally drop the
-    standard ones (see definitions_store.py for the shared implementation;
-    prompts.py's equivalent trio for prompts.json uses the exact same
-    class). save_custom_metric_scores_to_csv() persists the computed
-    scores/reasons themselves, into the data CSV instead (data/ is
-    gitignored, so that part stays local). Once saved, the metric is just
-    an ordinary CSV column on the next load; nothing special treats it as
-    "custom" anymore.
+    evaluate_missing_dimensions() judges one or more dimensions across a
+    whole long-format DataFrame, optionally restricted to a row subset
+    (e.g. a random sample, so a large dataset can be judged a little at a
+    time). It reuses evaluate()/build_eval_prompt() by passing whatever
+    `dimensions` dict is needed, so every metric shares the same judge
+    machinery and never drifts apart — a brand-new metric is just the case
+    where every row is a gap, since the column doesn't exist yet.
+
+    load_all_metric_definitions()/save_custom_metric_definition() let the
+    GUI persist a new metric permanently instead of it living only in
+    st.session_state: the definition (name + judge question) is merged into
+    metrics.json — save_custom_metric_definition() always reads and
+    rewrites the *whole* file, never a subset, so saving a new metric can
+    never accidentally drop any other entry (see definitions_store.py for
+    the shared implementation; prompts.py's equivalent trio for
+    prompts.json uses the exact same class). save_custom_metric_scores_to_csv()
+    persists the computed scores/reasons themselves, into the data CSV
+    instead (data/ is gitignored, so that part stays local). Once saved, a
+    metric is just an ordinary CSV column on the next load.
 """
 
 import json
@@ -74,46 +76,52 @@ import anthropic
 import textstat
 
 from src.definitions_store import DefinitionsStore
-from src.text_utils import slugify
 
-# Where ALL metric definitions live — the 5 standard ones and any custom
+# Where ALL metric definitions live — the standard ones and any custom
 # ones, together. Next to this file (not relative to the cwd), tracked in
 # git so a saved metric's judge question is shared with anyone who pulls
 # the repo. The *scores* for a custom metric go into the data CSV instead
 # (data/ is gitignored — see save_custom_metric_scores_to_csv()), since
 # those are per-dataset, not source.
 METRICS_PATH = Path(__file__).parent / "metrics.json"
-_metrics_store = DefinitionsStore(METRICS_PATH, content_field="description")
+_metrics_store = DefinitionsStore(METRICS_PATH, content_field="description", include_standard=False)
 
 
 def load_all_metric_definitions(path: Optional[Path] = None) -> dict:
-    """Load every metric definition — standard AND custom, active AND retired.
+    """Load every metric definition, active AND retired.
 
     See DefinitionsStore.load_all() for the full contract; this is a thin
     wrapper so callers keep using `from src.evaluation import
     load_all_metric_definitions` rather than reaching into the store
-    directly. Use load_active_metric_definitions() instead if you only want
-    the ones currently in use.
+    directly. Use active_metric_definitions() instead if you only want the
+    ones currently judged by default.
     """
     return _metrics_store.load_all(path)
 
 
-def load_active_metric_definitions(path: Optional[Path] = None) -> dict:
-    """Load every ACTIVE metric definition — standard and custom, together.
+def active_metric_definitions(path: Optional[Path] = None) -> dict:
+    """Load the currently-active metric definitions, flattened to slug -> description.
 
-    See DefinitionsStore.load_active() for the full contract. This is what
-    EVAL_DIMENSIONS and the GUI's metric list both filter on, so neither
-    can show a retired metric the other has stopped scoring.
+    Read fresh on every call (never cached at import time), so retiring or
+    adding a metric takes effect on the very next call. This is what
+    evaluate()/score_simplification() judge by default when no explicit
+    `dimensions` is given — a caller with a more specific selection of its
+    own (e.g. the GUI threading through whatever's currently toggled active
+    in its "Active metrics" dropdown) passes that instead.
     """
-    return _metrics_store.load_active(path)
+    return {
+        slug: entry["description"]
+        for slug, entry in load_all_metric_definitions(path).items()
+        if entry.get("active", True)
+    }
 
 
 def set_metric_active(slug: str, active: bool, path: Optional[Path] = None) -> None:
     """Retire or restore one metric definition in place (see DefinitionsStore.set_active()).
 
     Use this instead of deleting an entry from metrics.json — its
-    description and date_added survive, and it can be reactivated later by
-    calling this again with active=True.
+    description survives, and it can be reactivated later by calling this
+    again with active=True.
     """
     _metrics_store.set_active(slug, active, path)
 
@@ -146,50 +154,33 @@ Respond with ONLY a JSON object in exactly this format, with no preamble, no mar
 The "score" field must be a JSON boolean (true or false), never a string. The "reason" field is one short sentence explaining the score.\
 """
  
-# The subset of metrics.json marked `standard: true` AND `active: true` —
-# flattened to slug -> description, which is the shape
-# build_eval_prompt()/evaluate() (below) and every existing caller/test
-# expect. This is what gets judged on *every* simplification by default; a
-# custom (standard: false) metric in the same file is judged only on
-# demand, via evaluate_new_metric(). A standard metric retired via
-# set_metric_active(slug, False) stays in metrics.json (so its description/
-# history survives) but drops out of here and out of the GUI's metric list
-# at the same time, since both read the same `active` flag from the same
-# file.
-#
-# The 9 fine-grained dimensions below replaced the original 5 (now
-# retired, active: false, still in metrics.json) — they live in
-# metrics.json like every other standard entry, rather than as a hardcoded
-# dict, so they go through the same load/save path as a custom metric.
-EVAL_DIMENSIONS = {
-    slug: entry["description"]
-    for slug, entry in load_all_metric_definitions().items()
-    if entry.get("standard") and entry.get("active", True)
-}
- 
 def evaluate(
     raw_record,
     simplified: str,
+    dimensions: dict,
     model: str = EVAL_MODEL,
-    dimensions: Optional[dict] = None,
 ) -> dict:
     """
     Evaluate a simplified text against its original with an LLM judge.
 
+    There's no implicit "judge everything active" fallback: judging only
+    ever happens when a caller explicitly says which dimensions to judge —
+    in the GUI, that's always a user-triggered action (a button press) over
+    whatever's currently selected, never automatic. Pass
+    active_metric_definitions() yourself if you specifically want "every
+    currently-active metric" (e.g. the CLI script's batch pipeline does).
+
     Args:
         original: The original source text, and associated meta data.
         simplified: The simplified output to evaluate.
+        dimensions: Mapping of dimension name to judge question — exactly
+            the set to judge, nothing implied beyond it.
         model: Anthropic model name for the judge.
-        dimensions: Mapping of dimension name to judge question. Defaults to
-            EVAL_DIMENSIONS (the standard 5). Pass a one-entry dict to judge
-            a single custom dimension in isolation — e.g. evaluate_new_metric()
-            does this so an ad-hoc metric doesn't re-score the standard five.
 
     Returns:
         Dict keyed by dimension name.
         Score conventions: 1 = yes/pass, 0 = no/fail, -1 = parse error.
     """
-    dimensions = dimensions or EVAL_DIMENSIONS
 
     prompt = build_eval_prompt(raw_record, simplified, dimensions)
 
@@ -237,7 +228,7 @@ def evaluate(
 def build_eval_prompt(
     raw_record,
     simplified: str,
-    dimensions: Optional[dict] = None,
+    dimensions: dict,
 ):
     """
     Build the prompt for evaluating the query.
@@ -245,104 +236,98 @@ def build_eval_prompt(
     params:
         raw_record: the original record loaded from the database with all the context.
         simplified: the simplified record.
-        dimensions: Mapping of dimension name to judge question. Defaults to
-            EVAL_DIMENSIONS.
+        dimensions: Mapping of dimension name to judge question — exactly
+            the set to judge, nothing implied. Pass active_metric_definitions()
+            yourself for "every currently-active metric".
     """
-    dimensions = dimensions or EVAL_DIMENSIONS
     original = str(raw_record)
 
-    # the numerator simply counts out the list.
-    numerator = 1
-    formated_dim_explanations = ""
-    dim_explanations_template = "{num}. {dim}: {desc} \n"
+    explanations = "\n".join(
+        f"{i}. {dim}: {desc} " for i, (dim, desc) in enumerate(dimensions.items(), 1)
+    )
+    eval_dimensions = "\n".join(
+        f'"{dim}": {{"reason": "<one short sentence>", "score": true}}, ' for dim in dimensions
+    )
+
+    return EVAL_PROMPT.format(
+        original=original, simplified=simplified,
+        explanations=explanations, eval_dimensions=eval_dimensions,
+    )
 
 
-    formated_eval_dimensions = ""
-    for dim, description in dimensions.items():
-        # The explanation of each item.
-        explanation = dim_explanations_template.format(
-            num = numerator,
-            dim = dim,
-            desc = description
-        )
-        numerator += 1
-        formated_dim_explanations += explanation
-
-        # The json format template for the evaluation.
-        formated_eval = '"%s": {"reason": "<one short sentence>", "score": true}, \n' % dim
-        formated_eval_dimensions += formated_eval
-
-
-    prompt = EVAL_PROMPT.format(original=original,
-                                simplified=simplified,
-                                explanations = formated_dim_explanations,
-                                eval_dimensions = formated_eval_dimensions
-                               )
-
-    return prompt
-
-
-def evaluate_new_metric(
+def evaluate_missing_dimensions(
     df: pd.DataFrame,
-    name: str,
-    description: str,
+    dimensions: dict,
     model: str = EVAL_MODEL,
     on_progress=None,
+    rows: Optional[list] = None,
 ) -> pd.DataFrame:
-    """Judge every row of a long-format DataFrame on one new custom dimension.
+    """Judge whichever of ``dimensions`` a row doesn't already have a score for.
 
-    Makes one Anthropic API call per row — this is a live, billed, slow
-    operation (roughly one judge call's latency times ``len(df)``), unlike
-    the rest of prompt_improvement_workflow.py, which is instant local
-    pandas math. Intended for interactive use (e.g. the GUI's "add a
-    metric" form), not a hot loop.
+    A row already scored on every one of ``dimensions`` costs nothing; a
+    brand-new or partially-scored row costs exactly one Anthropic call
+    covering just that row's gaps (whichever of ``dimensions`` are missing
+    for it, scored together via evaluate()/build_eval_prompt() like any
+    other judge call). A brand-new custom metric is just the case where
+    every row is a gap, since its column doesn't exist yet.
+
+    This is what lets the GUI's "Run missing metrics over full dataset"
+    action catch a CSV up to the current, active metrics.json entries
+    (e.g. after a judge-prompt rewrite added new standard dimensions, or a
+    custom metric was defined before this CSV existed) without re-billing
+    rows already judged on them.
 
     Args:
         df: Long-format DataFrame with ``original_text`` and
-            ``transcribed_text`` columns (see prompt_improvement_workflow.py).
-        name: Human-readable metric name; slugified via
-            :func:`src.text_utils.slugify` into the new columns' prefix.
-        description: The judge question for this dimension, e.g. "Is the
-            tone appropriately formal for a legal audience?"
+            ``transcribed_text`` columns — only those two, no full
+            UHRIRecord needed.
+        dimensions: Mapping of slug -> judge question to check/fill gaps
+            for. Typically active_metric_definitions() (to catch up every
+            active metric), or a single ``{slug: description}`` for one
+            specific metric.
         model: Anthropic model name for the judge.
-        on_progress: Optional ``callback(done: int, total: int)`` invoked
-            after each row — e.g. to drive a progress bar in a GUI. Called
-            with (0, total) before the first row so callers can render an
-            initial 0% state.
+        on_progress: Optional ``callback(done: int, total: int)`` — total
+            counts only rows that actually need a call, so it's 0
+            immediately if every row is already fully judged.
+        rows: Restrict which row labels are even considered — e.g. a random
+            subset picked in the GUI so a huge dataset can be judged a
+            little at a time instead of all at once. Defaults to every row
+            in ``df``. A row in here that's already fully judged still
+            costs nothing (the gap check applies either way); a row NOT in
+            here is left untouched even if it has gaps.
 
     Returns:
-        df with two new columns added, ``f"{slug}_score"`` and
-        ``f"{slug}_reason"`` (modifies in place and returns).
+        df with a ``f"{slug}_score"``/``f"{slug}_reason"`` column for every
+        slug in ``dimensions``, filled for every row in ``rows`` that had a
+        gap (modifies in place and returns). A slug with no existing column
+        starts as NaN for every row before being filled in — including rows
+        outside ``rows``, which then stay NaN (still correctly "not yet
+        judged" rather than missing the column entirely).
     """
-    slug = slugify(name)
-    dimensions = {slug: description}
-    total = len(df)
+    for slug in dimensions:
+        if f"{slug}_score" not in df.columns:
+            df[f"{slug}_score"] = float("nan")
+            df[f"{slug}_reason"] = None
+
+    candidates = df.index if rows is None else rows
+    rows_needing_work = [
+        i for i in candidates if any(pd.isna(df.at[i, f"{slug}_score"]) for slug in dimensions)
+    ]
+    total = len(rows_needing_work)
 
     if on_progress:
         on_progress(0, total)
 
-    scores, reasons = [], []
-    for i, row in enumerate(df.itertuples(), 1):
-        result = evaluate(row.original_text, row.transcribed_text, model=model, dimensions=dimensions)
-        scores.append(result[slug]["score"])
-        reasons.append(result[slug]["reason"])
+    for done, i in enumerate(rows_needing_work, 1):
+        missing = {slug: desc for slug, desc in dimensions.items() if pd.isna(df.at[i, f"{slug}_score"])}
+        result = evaluate(df.at[i, "original_text"], df.at[i, "transcribed_text"], model=model, dimensions=missing)
+        for slug, entry in result.items():
+            df.at[i, f"{slug}_score"] = entry["score"]
+            df.at[i, f"{slug}_reason"] = entry["reason"]
         if on_progress:
-            on_progress(i, total)
+            on_progress(done, total)
 
-    df[f"{slug}_score"] = scores
-    df[f"{slug}_reason"] = reasons
     return df
-
-
-def load_custom_metric_definitions(path: Optional[Path] = None) -> dict:
-    """Load saved CUSTOM metric definitions only — the standard 5 excluded.
-
-    "Custom" means anything in metrics.json *not* marked `standard: true` —
-    i.e. whatever's been added via the GUI's "Add a new metric" form. Use
-    load_all_metric_definitions() instead if you need the standard ones too.
-    See DefinitionsStore.load_custom() for the full contract.
-    """
-    return _metrics_store.load_custom(path)
 
 
 def save_custom_metric_definition(
@@ -350,23 +335,19 @@ def save_custom_metric_definition(
     name: str,
     description: str,
     path: Optional[Path] = None,
-    date_added: Optional[str] = None,
 ) -> None:
-    """Persist one custom metric's definition (name + judge question).
+    """Persist one metric's definition (name + judge question) to metrics.json.
 
     See DefinitionsStore.save_custom() for the full contract, in particular
-    why this can never accidentally drop the standard 5 sharing the file.
+    why this can never accidentally drop any other entry sharing the file.
 
     Args:
         slug: The metric's column-prefix slug (see text_utils.slugify).
         name: Human-readable name, as typed in the GUI.
         description: The judge question.
         path: JSON file to write. Defaults to METRICS_PATH.
-        date_added: ISO date string (YYYY-MM-DD). Defaults to today — the
-            normal case, a fresh save from the GUI. Pass this explicitly
-            only to backfill an older entry.
     """
-    _metrics_store.save_custom(slug, name, description, path, date_added)
+    _metrics_store.save_custom(slug, name, description, path)
 
 
 def save_custom_metric_scores_to_csv(csv_path: str, slug: str, scores: list, reasons: list) -> None:
@@ -419,27 +400,32 @@ def score_simplification(
     raw_record,
     simplified: str,
     orig_readability: dict[str, float],
+    dimensions: dict,
 ) -> dict:
     """
     Compute all evaluation metrics for one simplified output.
- 
+
     Bundles the judge scores and readability deltas into a single flat dict
     so the caller doesn't have to assemble them by hand.
- 
+
     Args:
-        original: The original source text.
+        raw_record: The original record (and metadata) to evaluate against.
         simplified: The simplified output to score.
-        orig_readability: Readability dict for the original text 
- 
+        orig_readability: Readability dict for the original text
+        dimensions: Mapping of dimension name to judge question — passed
+            straight through to evaluate(). No implicit default: the caller
+            decides what gets judged (e.g. simplification.py's CLI pipeline
+            passes active_metric_definitions(); the GUI passes whatever is
+            currently selected).
+
     Returns:
         Flat dict of metrics
     """
     simp_read = readability(simplified)
-    scores = evaluate(raw_record, simplified)
- 
+    scores = evaluate(raw_record, simplified, dimensions)
+
     out = {
         "fk_grade": simp_read["fk_grade"],
-        # "fk_ease": simp_read["fk_ease"],
         "fk_grade_delta": orig_readability["fk_grade"] - simp_read["fk_grade"],
     }
     for dim, entry in scores.items():

@@ -1,20 +1,20 @@
-"""Tests for definitions_store.py — the shared "standard + custom" JSON store
-used by both evaluation.py (metrics.json) and prompts.py (prompts.json).
+"""Tests for definitions_store.py — the shared JSON definitions store used
+by both evaluation.py (metrics.json, include_standard=False) and
+prompts.py (prompts.json, include_standard=True, the default).
 
 Run from code/:
     python -m pytest tests/test_definitions_store.py
 """
 
 import json
-from datetime import date
 
 import pytest
 
 from src.definitions_store import DefinitionsStore
 
 
-def _store(tmp_path, name="defs.json"):
-    return DefinitionsStore(tmp_path / name, content_field="description")
+def _store(tmp_path, name="defs.json", include_standard=True):
+    return DefinitionsStore(tmp_path / name, content_field="description", include_standard=include_standard)
 
 
 def test_load_all_empty_when_file_missing(tmp_path):
@@ -27,60 +27,48 @@ def test_load_custom_empty_when_file_missing(tmp_path):
     assert store.load_custom() == {}
 
 
-def test_load_active_empty_when_file_missing(tmp_path):
-    store = _store(tmp_path)
-    assert store.load_active() == {}
-
-
 def test_load_custom_excludes_standard_entries(tmp_path):
     store = _store(tmp_path)
     store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "date_added": None},
-        "b": {"name": "b", "description": "d2", "standard": False, "date_added": "2026-09-13"},
+        "a": {"name": "a", "description": "d", "standard": True},
+        "b": {"name": "b", "description": "d2", "standard": False},
     }))
     assert set(store.load_custom()) == {"b"}
     assert set(store.load_all()) == {"a", "b"}
 
 
-def test_load_active_excludes_retired_entries(tmp_path):
+def test_load_all_treats_missing_active_flag_as_active(tmp_path):
+    # Entries written before "active" existed have no such key — callers
+    # filtering on entry.get("active", True) must treat that as active
+    # rather than silently excluding it.
     store = _store(tmp_path)
     store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "active": False, "date_added": None},
-        "b": {"name": "b", "description": "d2", "standard": True, "active": True, "date_added": None},
+        "a": {"name": "a", "description": "d", "standard": True},
     }))
-    assert set(store.load_active()) == {"b"}
-    # load_all() is unfiltered — the retired entry survives there.
-    assert "a" in store.load_all()
-
-
-def test_load_active_treats_missing_flag_as_active(tmp_path):
-    # Entries written before "active" existed have no such key — they must
-    # default to active rather than silently disappearing.
-    store = _store(tmp_path)
-    store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "date_added": None},
-    }))
-    assert set(store.load_active()) == {"a"}
+    assert store.load_all()["a"].get("active", True) is True
 
 
 def test_save_custom_roundtrips_and_defaults_active_true(tmp_path):
     store = _store(tmp_path)
-    store.save_custom("tone", "Tone", "Is it formal?", date_added="2026-09-13")
+    store.save_custom("tone", "Tone", "Is it formal?")
     assert store.load_custom() == {
         "tone": {
             "name": "Tone",
             "description": "Is it formal?",
             "standard": False,
             "active": True,
-            "date_added": "2026-09-13",
         }
     }
 
 
-def test_save_custom_defaults_date_added_to_today(tmp_path):
-    store = _store(tmp_path)
+def test_save_custom_omits_standard_field_when_include_standard_is_false(tmp_path):
+    # metrics.json's store (include_standard=False) — no "standard vs
+    # custom" distinction at all, every entry is just a metric.
+    store = _store(tmp_path, include_standard=False)
     store.save_custom("tone", "Tone", "Is it formal?")
-    assert store.load_custom()["tone"]["date_added"] == date.today().isoformat()
+    saved = store.load_all()["tone"]
+    assert "standard" not in saved
+    assert saved == {"name": "Tone", "description": "Is it formal?", "active": True}
 
 
 def test_save_custom_merges_without_clobbering(tmp_path):
@@ -105,9 +93,9 @@ def test_save_custom_preserves_standard_entries(tmp_path):
     # the standard entries sharing the file.
     store = _store(tmp_path)
     store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "date_added": None},
+        "a": {"name": "a", "description": "d", "standard": True},
     }))
-    store.save_custom("b", "B", "d2", date_added="2026-09-18")
+    store.save_custom("b", "B", "d2")
     all_defs = store.load_all()
     assert "a" in all_defs and all_defs["a"]["standard"] is True
     assert "b" in all_defs and all_defs["b"]["standard"] is False
@@ -116,22 +104,22 @@ def test_save_custom_preserves_standard_entries(tmp_path):
 def test_set_active_retires_without_deleting(tmp_path):
     store = _store(tmp_path)
     store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "active": True, "date_added": None},
+        "a": {"name": "a", "description": "d", "standard": True, "active": True},
     }))
     store.set_active("a", False)
     all_defs = store.load_all()
     assert all_defs["a"]["active"] is False
     assert all_defs["a"]["description"] == "d"  # untouched
-    assert "a" not in store.load_active()
+    assert "a" in all_defs  # never dropped from load_all()
 
 
 def test_set_active_can_reactivate(tmp_path):
     store = _store(tmp_path)
     store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "active": False, "date_added": None},
+        "a": {"name": "a", "description": "d", "standard": True, "active": False},
     }))
     store.set_active("a", True)
-    assert "a" in store.load_active()
+    assert store.load_all()["a"]["active"] is True
 
 
 def test_set_active_raises_for_unknown_slug(tmp_path):
@@ -144,8 +132,8 @@ def test_set_active_raises_for_unknown_slug(tmp_path):
 def test_set_active_does_not_affect_other_entries(tmp_path):
     store = _store(tmp_path)
     store.default_path.write_text(json.dumps({
-        "a": {"name": "a", "description": "d", "standard": True, "active": True, "date_added": None},
-        "b": {"name": "b", "description": "d2", "standard": True, "active": True, "date_added": None},
+        "a": {"name": "a", "description": "d", "standard": True, "active": True},
+        "b": {"name": "b", "description": "d2", "standard": True, "active": True},
     }))
     store.set_active("a", False)
     all_defs = store.load_all()

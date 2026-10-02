@@ -55,6 +55,8 @@ import pandas as pd
 LOW_VARIANCE_THRESHOLD = 0.04
 # Variance above this flags a prompt as inconsistent across texts.
 HIGH_VARIANCE_THRESHOLD = 0.03
+# Correlation (absolute value) above this flags a metric pair as redundant.
+HIGH_COVARIANCE_THRESHOLD = 0.8
 # Default number of sample rows shown in each inspection block.
 N_SAMPLES = 2
 
@@ -195,6 +197,67 @@ def check_metric_variance(
             _print_samples(samples[metric], [metric])
 
     return {"variances": variances, "low_variance_metrics": low_var, "samples": samples}
+
+
+def check_metric_covariance(
+    df: pd.DataFrame,
+    score_columns: List[str],
+    threshold: float = HIGH_COVARIANCE_THRESHOLD,
+    verbose: bool = True,
+) -> Dict[str, object]:
+    """Compute pairwise correlation between metrics and flag redundant pairs.
+
+    Two metrics that move together almost perfectly add little beyond what
+    either already contributes alone — one of them is a candidate for
+    removal (or for merging into a single question), same spirit as a
+    low-variance metric but about a *pair* instead of one metric on its own.
+
+    Correlation (not raw covariance) is what actually answers "are these
+    redundant": covariance's magnitude depends on each metric's own scale/
+    variance, so it can't be compared against one fixed threshold across
+    different metric pairs the way a value in [-1, 1] can.
+
+    Args:
+        df: Long-format DataFrame with score columns.
+        score_columns: Metric score column names to correlate pairwise.
+        threshold: Absolute correlation above this flags a pair as redundant.
+        verbose: If True (default), print the report as before. Set to False
+            to compute silently, e.g. for a GUI that renders the result itself.
+
+    Returns:
+        Dict with keys ``correlations`` (full metric x metric DataFrame,
+        NaN on the diagonal so it never flags a metric against itself) and
+        ``high_covariance_pairs`` (list of ``(metric_a, metric_b, corr)``
+        tuples, one entry per unordered pair above ``threshold``, sorted by
+        |corr| descending).
+    """
+    correlations = df[score_columns].corr()
+    for col in correlations.columns:
+        correlations.loc[col, col] = float("nan")
+
+    high_covariance_pairs = []
+    for i, metric_a in enumerate(score_columns):
+        for metric_b in score_columns[i + 1 :]:
+            corr = correlations.loc[metric_a, metric_b]
+            if pd.notna(corr) and abs(corr) >= threshold:
+                high_covariance_pairs.append((metric_a, metric_b, corr))
+    high_covariance_pairs.sort(key=lambda pair: abs(pair[2]), reverse=True)
+
+    if verbose:
+        print("Metric pairwise correlation:")
+        print(correlations.round(3))
+        print()
+
+        if not high_covariance_pairs:
+            print("No metric pair is highly correlated — no redundancy candidates.")
+
+        for metric_a, metric_b, corr in high_covariance_pairs:
+            print("=" * 70)
+            print(f"WARNING: '{metric_a}' and '{metric_b}' are highly correlated ({corr:.3f})")
+            print("  -> They tend to agree almost every time — one adds little over the other.")
+            print("  -> Consider removing one, or merging them into a single judge question.")
+
+    return {"correlations": correlations, "high_covariance_pairs": high_covariance_pairs}
 
 
 def show_sanity_samples(
@@ -426,8 +489,6 @@ if __name__ == "__main__":
     # score_simplification()'s "__" is flattened to "_" by _build_row()).
     weights = {
         "fk_normalized_score": 5.0,
-        # "accessible_and_simple_score": 5.0,  # dimension split in the 5 -> 9
-        # refactor into the two below; both kept at x5 (review: or x2.5 each?)
         "plain_vocabulary_score": 5.0,
         "standalone_comprehension_score": 5.0,
     }

@@ -12,6 +12,7 @@ from src.prompt_improvement_workflow import (
     compute_weighted_average,
     compare_prompts,
     get_high_variance_samples,
+    check_metric_covariance,
 )
 
 
@@ -255,6 +256,60 @@ def test_get_high_variance_samples_empty_when_none_flagged():
     df_full = df.assign(original_text="x", transcribed_text="y")
     samples = get_high_variance_samples(df_full, stats, score_columns=[])
     assert samples == {}
+
+
+# ── check_metric_covariance ───────────────────────────────────────────────────
+
+
+def test_check_metric_covariance_flags_perfectly_correlated_pair():
+    df = _score_df((1, 1), (0, 0), (1, 1), (0, 0))
+    result = check_metric_covariance(df, ["a_score", "b_score"], threshold=0.8, verbose=False)
+    assert len(result["high_covariance_pairs"]) == 1
+    metric_a, metric_b, corr = result["high_covariance_pairs"][0]
+    assert {metric_a, metric_b} == {"a_score", "b_score"}
+    assert corr == pytest.approx(1.0)
+
+
+def test_check_metric_covariance_ignores_unrelated_metrics():
+    df = _score_df((1, 0), (0, 1), (1, 1), (0, 0))
+    result = check_metric_covariance(df, ["a_score", "b_score"], threshold=0.8, verbose=False)
+    assert result["high_covariance_pairs"] == []
+
+
+def test_check_metric_covariance_threshold_is_tunable():
+    df = _score_df((1, 1), (0, 0), (1, 0), (0, 1))  # corr = 0.0
+    assert check_metric_covariance(df, ["a_score", "b_score"], threshold=0.01, verbose=False)["high_covariance_pairs"] == []
+
+
+def test_check_metric_covariance_diagonal_is_nan_not_self_flagged():
+    df = _score_df((1, 1), (0, 0), (1, 1), (0, 0))
+    result = check_metric_covariance(df, ["a_score", "b_score"], threshold=0.8, verbose=False)
+    assert pd.isna(result["correlations"].loc["a_score", "a_score"])
+    assert all(a != b for a, b, _ in result["high_covariance_pairs"])
+
+
+def test_check_metric_covariance_sorts_by_absolute_correlation_descending():
+    df = pd.DataFrame({
+        "a_score": [1, 0, 1, 0, 1, 0],
+        "b_score": [1, 0, 1, 0, 0, 1],  # perfectly correlated with a
+        "c_score": [1, 1, 0, 0, 1, 0],  # weaker correlation with a
+    })
+    result = check_metric_covariance(df, ["a_score", "b_score", "c_score"], threshold=0.0, verbose=False)
+    pairs = result["high_covariance_pairs"]
+    assert abs(pairs[0][2]) >= abs(pairs[-1][2])
+
+
+def test_check_metric_covariance_verbose_false_prints_nothing(capsys):
+    df = _score_df((1, 1), (0, 0))
+    check_metric_covariance(df, ["a_score", "b_score"], verbose=False)
+    assert capsys.readouterr().out == ""
+
+
+def test_check_metric_covariance_verbose_true_prints_report(capsys):
+    df = _score_df((1, 1), (0, 0), (1, 1), (0, 0))
+    check_metric_covariance(df, ["a_score", "b_score"], threshold=0.8, verbose=True)
+    out = capsys.readouterr().out
+    assert "highly correlated" in out
 
 
 if __name__ == "__main__":

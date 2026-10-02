@@ -4,14 +4,13 @@ Build the Plain-English Translation Review tool.
 
 Injects two things into review_template.html:
   * REVIEW_DATA : the original + AI-draft pairs (from review_data.json)
-  * DIMENSIONS : the `standard: true, active: true` entries of
-                   src/metrics.json — the same subset evaluation.py derives
-                   as EVAL_DIMENSIONS, so the human review axes can never
-                   drift from the judge's. Custom (standard: false) GUI
-                   metrics are excluded: they are judged on demand only,
-                   not part of the calibration contract. Retired standard
-                   metrics (active: false) are excluded too — they're no
-                   longer part of what the judge scores either.
+  * DIMENSIONS : the `active: true` entries of src/metrics.json — the same
+                   set evaluation.py's active_metric_definitions() derives,
+                   so the human review axes can never drift from what the
+                   judge is currently scoring. A retired metric (active:
+                   false) is excluded: its description/history stays in
+                   metrics.json, it's just no longer part of either the
+                   judge's or the reviewer's calibration axes.
 
 Usage:
     python review/build_review_tool.py
@@ -40,25 +39,28 @@ LABELS = {
     "additions_explanatory_only": "Additions explanatory only",
     "plain_vocabulary": "Plain vocabulary",
     "standalone_comprehension": "Stands alone",
+    "absolute_accessible": "Absolute accessible",
+    "actors_with_context": "Actors with context",
 }
 
 # Which dimensions are accessibility (judged on the draft alone) vs fidelity.
-ACCESSIBILITY = {"plain_vocabulary", "standalone_comprehension"}
+ACCESSIBILITY = {"plain_vocabulary", "standalone_comprehension", "absolute_accessible"}
 GROUP_FIDELITY = "Fidelity: checked against the original record"
 GROUP_ACCESS = "Accessibility: judging the draft on its own"
 
 
 def load_eval_dimensions() -> dict:
-    """Load the standard, active metric definitions from metrics.json.
+    """Load the active metric definitions from metrics.json.
 
-    Same slug -> description mapping that evaluation.py derives as
-    EVAL_DIMENSIONS, read from the same file, without importing the module
-    (which would pull in anthropic/pandas just to build a static page).
+    Same slug -> description mapping that evaluation.py's
+    active_metric_definitions() derives, read from the same file, without
+    importing the module (which would pull in anthropic/pandas just to
+    build a static page).
 
     `active` defaults to True when missing (older entries predate the
-    field). A standard metric marked `active: false` — e.g. one of the
-    original 5, retired when the judge moved to 9 fine-grained dimensions —
-    is excluded here exactly like it's excluded from EVAL_DIMENSIONS: its
+    field). A metric marked `active: false` — e.g. one of the original 5,
+    retired when the judge moved to 9 fine-grained dimensions — is excluded
+    here exactly like it's excluded from active_metric_definitions(): its
     description/history stays in metrics.json, it's just no longer part of
     either the judge's or the reviewer's calibration axes.
     """
@@ -66,10 +68,10 @@ def load_eval_dimensions() -> dict:
     dims = {
         slug: entry["description"].strip()
         for slug, entry in entries.items()
-        if entry.get("standard") and entry.get("active", True)
+        if entry.get("active", True)
     }
     if not dims:
-        raise SystemExit(f"No standard metrics found in {METRICS_JSON}")
+        raise SystemExit(f"No active metrics found in {METRICS_JSON}")
     return dims
 
 

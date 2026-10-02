@@ -8,128 +8,49 @@ Usage:
     Reads the same long-format CSV as prompt_improvement_workflow.py
     (default data/cleaned.csv, editable in the sidebar) and walks through the
     same four-step evaluation report interactively in the browser instead of
-    via CLI `input()` prompts.
+    via CLI `input()` prompts — plus one GUI-only tab, Metric Covariance
+    (check_metric_covariance(), also in prompt_improvement_workflow.py, just
+    not yet wired into that module's CLI __main__).
 
 Deliberately thin: this file is UI only. Every number it shows comes from
 calling prompt_improvement_workflow.py's step functions with verbose=False,
-which hands back plain DataFrames/dicts instead of printed text — see that
-module's "Design note" docstring section. If the underlying computation
-ever needs to change (new metric, new threshold logic, new step), change it
-there once; both this GUI and the CLI script pick it up automatically.
+which hands back plain DataFrames/dicts instead of printed text. If the
+underlying computation ever needs to change, change it there once; both
+this GUI and the CLI script pick it up automatically.
 
-Both the "Metrics" and "Prompts" sidebar sections follow the same four-part
-pattern — tweak / remove / view / add — for the same reason: a metric and a
-prompt are the two "dimensions" a user compares things along, so their
-controls are deliberately symmetric. Where the two sides were byte-for-byte
-identical logic (only "remove", via _select_active_items — see its
-docstring) they share one function; where they differ enough to matter
-(_render_add_metric_form / _render_add_prompt_form, "add") they stay two
-mirrored functions rather than being forced into one with a pile of
-conditionals.
+The "Metrics" and "Prompts" sidebar sections share one tweak/remove/view/add
+pattern (a metric and a prompt are the two "dimensions" a user compares
+things along): a weight slider (metrics only), a multiselect to
+hide/reselect an item (_select_active_items, shared by both), a
+description/template viewer (_render_definition_viewer, shared), and an
+"Add a new ..." form that calls a live LLM, gated behind a cost-confirmation
+checkbox. An added item lives only in st.session_state until "💾 Save"
+merges its definition into metrics.json/prompts.json (shared with anyone
+who pulls the repo) and its data into the CSV (data/ is gitignored, local
+only) — see code/src/README.md for the full definitions-store design.
 
-    - Tweak: a weight slider per active metric (metrics only — a prompt
-      doesn't have a "weight" the way a metric does; a prompt is a thing
-      being compared, not a thing that's combined with others).
-    - Remove: the "Active metrics"/"Active prompts" dropdown hides an item
-      from the weighted average / variance chart / prompt comparison
-      without touching the underlying data — reversible any time by
-      reselecting it. The Metric Variance and Prompt Comparison tabs'
-      flagged-item expanders also get a one-click "Remove" button wired to
-      the same selection.
-    - View: "📋 View metric description" / "📋 View prompt template" — pick
-      one from a dropdown and see its judge question or full template text.
-      Pure inspection, meant to make the tweak/remove/add decisions above
-      easier without having to go read evaluation.py/prompts.py.
-    - Add: an "➕ Add a new ..." expander sits directly under each dropdown.
-      Both forms call a live LLM: "Add a new metric" judges a new dimension
-      once per row (evaluation.py); "Add a new prompt" simplifies *and*
-      judges once per unique text (simplification.py) — double the API
-      calls, across two providers. Both are gated behind an explicit
-      confirmation checkbox, and both always process the full dataset
-      rather than a sample, so every metric/prompt stays fully populated
-      and the rest of the workflow never has to deal with partial coverage
-      or NaN-handling. Added items live only in st.session_state (see
-      _reattach_custom_metrics/_reattach_custom_prompts) until a "💾 Save"
-      button persists them (_render_save_metrics_section /
-      _render_save_prompts_section): the definition (judge question / prompt
-      template) is merged into metrics.json / prompts.json, next to
-      evaluation.py / prompts.py — one unified file per domain holding both
-      the standard definitions and any custom ones (an `standard: true/false`
-      flag tells them apart, not which file they're in), git-tracked so it's
-      shared with anyone who pulls the repo. The actual data — computed
-      scores as new columns, generated rows appended — is written into the
-      CSV itself instead (data/ is gitignored, so that part stays local).
-      Once saved, a metric or prompt is just ordinary CSV content on the
-      next load — nothing "custom" about it anymore. Unsaved items disappear
-      if the CSV path, mtime, or row count changes underneath them.
+Settings (weights, active metrics/prompts, thresholds) persist separately,
+to a `<csv name>.settings.json` sidecar under data/ (gitignored — a
+personal workspace preference, not a shared research artifact like a saved
+metric/prompt). Auto-loads once per session without clobbering live changes.
 
-Settings persistence (weights, active metrics/prompts, thresholds, etc.):
-    A "💾 Save current settings" button up top (_save_settings/_load_settings)
-    writes every sidebar knob — Samples to show, Auto-format toggle, both
-    variance thresholds, which metrics/prompts are active, and every weight
-    slider — into a `<csv name>.settings.json` sidecar next to the CSV. This
-    is a *personal workspace preference*, not a shared research artifact
-    like a saved metric/prompt definition, so — unlike metrics.json/
-    prompts.json — it lives under data/ (gitignored) rather than next to
-    evaluation.py/prompts.py: never git-tracked, never shared.
-    Loaded back automatically the moment this CSV is opened, but only ever
-    *seeds* each widget's session_state once per session (the same pattern
-    active_metrics/active_prompts already use) — a saved value never
-    clobbers a change you've since made live. active_metrics/active_prompts
-    each save their "known" universe alongside the active list, for the
-    same reason _select_active_items tracks known_<kind>: to tell "this
-    metric existed and I deliberately excluded it" apart from "this metric
-    didn't exist yet when I saved, default it to included".
+New metric: just add it to metrics.json — main() seeds an empty column for
+every *active* entry a loaded CSV doesn't have yet, so it shows up
+immediately (flagged "0/N judged"), rather than being invisible until
+someone happens to judge it for this particular CSV. See evaluation.py's
+docstring for the active/retired mechanics.
 
-Open Issues:
-    - Single-file/single-tab layout. Fine at today's scale (4 steps, one CSV).
-    - Saving a prompt appends rows, changing the CSV's row count — so it
-      also retires any *other* still-unsaved custom metric or prompt (their
-      stored base row count no longer matches). Saving a metric only adds
-      columns, so it doesn't have this side effect on other pending items.
-      Save one thing at a time if you have several pending, to be safe.
-    - No "reset to defaults" button for settings yet — only save/auto-load.
-    - Settings only reliably auto-load for whatever CSV is at
-      DEFAULT_DATA_PATH (i.e. whatever's already showing the moment the
-      session starts) — every "seed once" setting (n_samples,
-      auto_format_original, both thresholds, every weight, active_metrics,
-      active_prompts) shares the same "only seeds if the session_state key
-      doesn't already exist" guard, seeded against whatever data_path was
-      showing on that very first render. Typing in a *different* CSV path
-      mid-session won't re-seed anything from that other file's sidecar —
-      confirmed while testing this feature, not new to it: switching paths
-      mid-session already didn't reset active_metrics/known_metrics before
-      settings persistence existed. Properly fixing it means detecting a
-      data_path change and re-running every seeding step (and clearing the
-      now-stale session_state) — worth doing if multi-CSV-per-session
-      becomes a real workflow; skipped for now since one CSV per session is
-      today's actual usage.
-
-Resumption — how to scale this up when it outgrows a single file:
-    - New step: write one `render_<step>_tab(...)` function below and add one
-      more entry to the `STEPS` list. Nothing else needs to change.
-    - New metric in the CSV: no code change needed — weight sliders and
-      variance tables are generated from `get_score_columns(df)`, so a new
-      `*_score` column just shows up. This includes a metric retired from
-      metrics.json (`active: false`, see evaluation.py's docstring): its
-      already-computed column keeps showing here with its description
-      intact (metric_descriptions below reads ALL of metrics.json, not
-      just the active subset) — `active` only gates whether it's part of
-      EVAL_DIMENSIONS for a *new* judging run, not whether existing data
-      for it is still viewable/selectable here.
-    - Growing past a handful of steps/tabs: split each render_* function out
-      into its own module under src/gui/ and import them here; `st.tabs` can
-      be swapped for `st.navigation`/multipage app structure without touching
-      the workflow module.
-    - Multiple people using it at once / needing persistence across runs:
-      move `st.session_state` usage to a small results cache keyed by
-      (data path, weights, thresholds) so re-runs don't require re-picking
-      the same sliders.
+Resumption:
+    - New step: write one `render_<step>_tab(...)` function and add one
+      entry to `STEPS`. Nothing else needs to change.
+    - Open issues and scaling notes: see code/src/README.md.
 """
 
 import json
+import random
 import sys
 from pathlib import Path
+from typing import Callable
 
 # Same trick as prompt_improvement_workflow.py: when run as
 # `streamlit run src/prompt_improvement_app.py` from code/, we need code/ on
@@ -143,11 +64,13 @@ import streamlit as st
 from src.prompt_improvement_workflow import (
     LOW_VARIANCE_THRESHOLD,
     HIGH_VARIANCE_THRESHOLD,
+    HIGH_COVARIANCE_THRESHOLD,
     N_SAMPLES,
     get_score_columns,
     normalise_fk_grade,
     compute_weighted_average,
     check_metric_variance,
+    check_metric_covariance,
     show_sanity_samples,
     compare_prompts,
     get_high_variance_samples,
@@ -169,9 +92,8 @@ from src.text_utils import format_legal_bullets, slugify
 # Anthropic client too, same as everything else behind LLM_JUDGE_AVAILABLE.
 try:
     from src.evaluation import (
-        evaluate_new_metric,
+        evaluate_missing_dimensions,
         load_all_metric_definitions,
-        load_custom_metric_definitions,
         save_custom_metric_definition,
         save_custom_metric_scores_to_csv,
         EVAL_MODEL,
@@ -256,6 +178,52 @@ def load_data(path: str, mtime: float) -> pd.DataFrame:
 # ── add (live LLM judge) ──────────────────────────────────────────────────────
 
 
+def _render_sample_controls(total: int, key_prefix: str, item_label: str) -> tuple:
+    """Slider + randomize button for picking a random subset to run a live LLM action over.
+
+    Shared by every "run the judge/generator over the dataset" action (Run
+    missing metrics, Add a new metric, Add a new prompt) — all three cost
+    real money per row/text, and a dataset that's small and cheap today may
+    not stay that way. Defaults to the full count, so nothing changes for
+    anyone who doesn't touch the slider.
+
+    Args:
+        total: How many items are available to sample from (rows with
+            gaps, or unique texts — whatever the caller is about to run
+            the action over).
+        key_prefix: Unique per call site — becomes the slider/button's
+            session_state keys, so two of these on the same page (unlikely
+            today, but cheap to keep safe) never collide.
+        item_label: What's being sampled, for the slider's label/help text,
+            e.g. "rows with gaps" or "unique texts".
+
+    Returns:
+        (sample_size, seed): seed only changes when "🎲" is clicked, so the
+        *same* random subset survives reruns from unrelated widgets (typing
+        in the name field, say) instead of reshuffling under the user on
+        every interaction. Pass seed straight to e.g.
+        ``random.Random(seed).sample(items, sample_size)``.
+    """
+    size_key, seed_key = f"{key_prefix}_sample_size", f"{key_prefix}_sample_seed"
+    st.session_state.setdefault(size_key, total)
+    st.session_state.setdefault(seed_key, 0)
+
+    slider_col, button_col = st.columns([5, 1])
+    with slider_col:
+        sample_size = st.slider(
+            f"Sample size ({item_label})", min_value=1, max_value=total, key=size_key,
+            help=f"Run this over a random {total}-item subset instead of all of "
+                 f"them — cheaper/faster to try first, and necessary once the "
+                 f"dataset is too large to run in full every time.",
+        )
+    with button_col:
+        st.write("")  # vertical spacer so the button lines up with the slider
+        if st.button("🎲", key=f"{key_prefix}_randomize", help="Pick a new random subset"):
+            st.session_state[seed_key] += 1
+
+    return sample_size, st.session_state[seed_key]
+
+
 def _progress_callback(progress_widget, unit: str):
     """Build an `on_progress(done, total)` callback that drives a `st.progress` widget.
 
@@ -308,7 +276,9 @@ def _reattach_custom_metrics(df: pd.DataFrame, data_path: str, mtime: float) -> 
     return df
 
 
-def _select_active_items(all_items: list, kind: str, help_text: str) -> list:
+def _select_active_items(
+    all_items: list, kind: str, help_text: str, format_func: Callable[[str], str] = str,
+) -> list:
     """Dropdown of which metrics or prompts are active — shared by both sidebar sections.
 
     "Active" is the "remove" action for either kind — deselecting one here
@@ -332,6 +302,10 @@ def _select_active_items(all_items: list, kind: str, help_text: str) -> list:
             keys (``active_<kind>``/``known_<kind>``) and the multiselect's
             label ("Active <kind>").
         help_text: Tooltip text, specific to what "active" means for this kind.
+        format_func: How to render one item's label in the dropdown. The
+            selection itself is always the real item (a column name or
+            prompt value) — this only changes what's displayed, e.g. the
+            metrics side appends a "not fully judged yet" warning.
     """
     active_key, known_key = f"active_{kind}", f"known_{kind}"
     known = st.session_state.get(known_key, [])
@@ -343,32 +317,166 @@ def _select_active_items(all_items: list, kind: str, help_text: str) -> list:
         st.session_state[active_key] = current
     st.session_state[known_key] = list(all_items)
 
-    return st.multiselect(f"Active {kind}", options=all_items, key=active_key, help=help_text)
+    return st.multiselect(
+        f"Active {kind}", options=all_items, key=active_key, help=help_text, format_func=format_func,
+    )
+
+
+def _build_metric_names(all_metrics: list, metric_defs: dict) -> dict:
+    """Map each "_score" column to a human-readable display name.
+
+    metrics.json's own "name" field is the source — the same field a
+    custom metric's typed name already lives in (see _render_add_metric_form)
+    — so a technical slug like "obligations_complete_score" never has to
+    be shown verbatim anywhere in the GUI. A column metrics.json doesn't
+    govern at all (fk_normalized_score; a one-off column added by hand)
+    falls back to a generic "underscores -> Title Case" conversion of its
+    own name.
+    """
+    names = {}
+    for col in all_metrics:
+        slug = col[: -len("_score")] if col.endswith("_score") else col
+        entry = metric_defs.get(slug)
+        names[col] = entry["name"] if entry else slug.replace("_", " ").title()
+    return names
+
+
+def _metric_option_label(col: str, metric_coverage: dict, metric_names: dict) -> str:
+    """Multiselect format_func: show a metric's display name, flagging gaps.
+
+    `col` is always the real column name (what gets selected/used downstream)
+    — this only changes the displayed text: the human name from
+    metric_names, plus a "done/total judged" warning when metric_coverage
+    says this one has gaps. A column not in metric_coverage at all
+    (retired, or not governed by metrics.json — fk_normalized_score) is
+    shown with no warning, same as before this feature existed.
+    """
+    label = metric_names.get(col, col)
+    coverage = metric_coverage.get(col)
+    if coverage and coverage[0] < coverage[1]:
+        done, total = coverage
+        return f"{label}  ⚠️ {done}/{total} judged"
+    return label
+
+
+def _render_run_missing_metrics_section(
+    df: pd.DataFrame,
+    data_path: str,
+    base_n_rows: int,
+    metric_defs: dict,
+    metric_coverage: dict,
+) -> None:
+    """Offer to judge whichever active metrics.json entries aren't fully scored yet.
+
+    metrics.json is the ground truth for which metrics exist (see main()'s
+    column-seeding, right before metric_coverage is computed) — a metric
+    defined there but never judged for this CSV shows up here with
+    0/base_n_rows judged, exactly like one only partially judged after a
+    judge-prompt rewrite added it. One button handles both cases at once,
+    across every incomplete active metric together: evaluate_missing_
+    dimensions() makes exactly one Anthropic call per row that still has
+    *any* gap, covering whichever of these dimensions that row is missing
+    — not one call per metric.
+
+    Retired (active: false) metrics never appear here; see
+    metric_coverage's construction in main() for why.
+
+    Offers a sample-size slider (see _render_sample_controls()) over
+    whichever rows actually have a gap, rather than always running every
+    one of them — important once the dataset is large enough that "every
+    row with a gap" is itself a lot of rows.
+    """
+    if not LLM_JUDGE_AVAILABLE:
+        return
+    incomplete = {
+        slug: metric_defs[slug]["description"]
+        for slug in metric_defs
+        if metric_coverage.get(f"{slug}_score", (base_n_rows, base_n_rows))[0] < base_n_rows
+    }
+    if not incomplete:
+        return
+
+    base_df = df.iloc[:base_n_rows]
+    rows_needing_work = [
+        i for i in base_df.index if any(pd.isna(base_df.at[i, f"{slug}_score"]) for slug in incomplete)
+    ]
+
+    with st.expander(f"⚠️ {len(incomplete)} metric(s) not fully judged over this dataset"):
+        st.write(", ".join(f"**{metric_defs[slug]['name']}**" for slug in sorted(incomplete)))
+        sample_size, seed = _render_sample_controls(
+            len(rows_needing_work), "run_missing_metrics", "rows with gaps",
+        )
+        sampled_rows = random.Random(seed).sample(rows_needing_work, sample_size)
+
+        st.warning(
+            f"⚠️ **This costs money.** Filling the gaps makes {sample_size} live "
+            f"Anthropic API calls ({EVAL_MODEL}) covering {len(incomplete)} metric(s) — "
+            f"billed to your API credits, taking a few minutes.",
+            icon="💸",
+        )
+        confirmed = st.checkbox(
+            "I understand this spends API credits — go ahead", key="confirm_run_missing_metrics",
+        )
+        button_label = (
+            "🧮 Run missing metrics over full dataset" if sample_size == len(rows_needing_work)
+            else f"🧮 Run missing metrics over sample ({sample_size})"
+        )
+        if st.button(button_label, disabled=not confirmed):
+            progress = st.progress(0.0, text="Starting…")
+            try:
+                filled = evaluate_missing_dimensions(
+                    base_df.copy(), incomplete, rows=sampled_rows,
+                    on_progress=_progress_callback(progress, "rows judged"),
+                )
+            except Exception as e:  # noqa: BLE001 - surface any judge/parse/API failure to the user
+                st.error(f"Judge run failed: {e}")
+                return
+            try:
+                # Reused for standard dimensions too, not just custom ones —
+                # despite the name, nothing about this function is actually
+                # custom-specific: it just writes f"{slug}_score"/
+                # f"{slug}_reason" columns into the CSV, re-read fresh from
+                # disk so it can never clobber anything else. Rows outside
+                # the sample keep whatever they already had (NaN if still
+                # unjudged), since `filled` only touched `sampled_rows`.
+                for slug in incomplete:
+                    save_custom_metric_scores_to_csv(
+                        data_path, slug,
+                        filled[f"{slug}_score"].tolist(),
+                        filled[f"{slug}_reason"].tolist(),
+                    )
+            except Exception as e:  # noqa: BLE001 - surface any I/O failure to the user
+                st.error(f"Save failed: {e}")
+                return
+            st.success(f"Judged and saved {len(incomplete)} metric(s) across {sample_size} rows.")
+            st.rerun()
 
 
 def _render_add_metric_form(df: pd.DataFrame, data_path: str, mtime: float) -> None:
-    """Expander form to judge one new custom metric across every row.
+    """Expander form to judge one new custom metric, optionally over a sample.
 
-    Calls evaluate_new_metric() (evaluation.py): one live Anthropic API call
-    per row, so — unlike everything else in this sidebar — it's slow and
-    billed. Gated behind an explicit confirmation checkbox for that reason,
-    and always scores the full dataset rather than a sample, so every
-    metric stays fully populated and the rest of the workflow (which
-    assumes dense score columns) never has to deal with partially-scored
-    metrics or NaN-handling.
+    Calls evaluate_missing_dimensions() (evaluation.py) with a single
+    ``{slug: description}`` dimension — a brand-new metric has no existing
+    column, so every row in the chosen sample counts as a gap to fill.
+    Sampling (see _render_sample_controls()) lets a new judge question be
+    sanity-checked cheaply on a handful of rows before committing to the
+    full, and eventually much larger, dataset; rows left out of the sample
+    just stay NaN — visible as "⚠️ N/total judged" in the metrics dropdown
+    once saved, and fillable later via "Run missing metrics" without
+    re-billing this sample.
     """
     with st.expander("➕ Add a new metric (LLM judge)"):
         if not LLM_JUDGE_AVAILABLE:
             st.warning(f"LLM judge unavailable: {LLM_JUDGE_IMPORT_ERROR}")
             return
 
-        saved_defs = load_custom_metric_definitions()
+        saved_defs = load_all_metric_definitions()
         picked = st.selectbox(
             "📂 Load a saved metric definition (optional)",
             ["— new metric —"] + list(saved_defs),
-            help="Metrics saved to disk (see the '💾 Save' button after "
-                 "judging) — pick one to reuse its name/question instead of "
-                 "retyping them.",
+            help="Metrics saved to disk — pick one to reuse its name/"
+                 "question instead of retyping them (e.g. as a starting "
+                 "point for a close variant).",
         )
         default_name, default_description = "", ""
         if picked != "— new metric —":
@@ -380,11 +488,13 @@ def _render_add_metric_form(df: pd.DataFrame, data_path: str, mtime: float) -> N
             "Judge question", value=default_description,
             placeholder="e.g. Is the tone appropriately formal for a legal audience?",
         )
+        sample_size, seed = _render_sample_controls(len(df), "add_metric", "rows")
+        sampled_rows = random.Random(seed).sample(list(df.index), sample_size)
+
         st.warning(
-            f"⚠️ **This costs money.** Scoring all {len(df)} rows makes {len(df)} live "
-            f"Anthropic API calls ({EVAL_MODEL}) — that's {len(df)} calls billed to "
-            f"your API credits, taking a few minutes to finish. It is **not** free "
-            f"or local, unlike the rest of this app.",
+            f"⚠️ **This costs money.** Scoring {sample_size} row(s) makes {sample_size} live "
+            f"Anthropic API calls ({EVAL_MODEL}) — billed to your API credits, taking a few "
+            f"minutes to finish. It is **not** free or local, unlike the rest of this app.",
             icon="💸",
         )
         confirmed = st.checkbox("I understand this spends API credits — go ahead")
@@ -393,8 +503,8 @@ def _render_add_metric_form(df: pd.DataFrame, data_path: str, mtime: float) -> N
             progress = st.progress(0.0, text="Starting…")
             try:
                 slug = slugify(name)
-                scored = evaluate_new_metric(
-                    df.copy(), name, description,
+                scored = evaluate_missing_dimensions(
+                    df.copy(), {slug: description}, rows=sampled_rows,
                     on_progress=_progress_callback(progress, "rows judged"),
                 )
             except Exception as e:  # noqa: BLE001 - surface any judge/parse/API failure to the user
@@ -410,7 +520,7 @@ def _render_add_metric_form(df: pd.DataFrame, data_path: str, mtime: float) -> N
                 "scores": scored[f"{slug}_score"].tolist(),
                 "reasons": scored[f"{slug}_reason"].tolist(),
             }
-            st.success(f"Added metric '{slug}_score' — scored {len(df)} rows.")
+            st.success(f"Added metric '{slug}_score' — scored {sample_size} of {len(df)} rows.")
             st.rerun()
 
 
@@ -418,8 +528,8 @@ def _render_save_metrics_section(data_path: str, base_n_rows: int) -> None:
     """One-click persistence for each custom metric added this session.
 
     Merges the definition into metrics.json (git-tracked, so it's shared
-    with anyone who pulls the repo — alongside the standard 5 in the same
-    file) and writes the computed scores into data_path's CSV in place
+    with anyone who pulls the repo — alongside the standard ones in the
+    same file) and writes the computed scores into data_path's CSV in place
     (data/ is gitignored, so that part only ever affects your local copy) —
     so this metric no longer needs re-judging (or re-billing) next session.
 
@@ -457,50 +567,47 @@ def _render_save_metrics_section(data_path: str, base_n_rows: int) -> None:
 def _render_definition_viewer(
     active_items: list,
     contents: dict,
-    dates: dict,
     *,
     kind: str,
     expander_title: str,
     selectbox_label: str,
     not_available: str,
     as_code: bool = False,
+    format_func: Callable[[str], str] = str,
 ) -> None:
-    """Let the user look up an item's stored content, and when it was added.
+    """Let the user look up an item's stored content.
 
     Shared by the "View metric description" / "View prompt template" panels
     — pure inspection, makes it easier to decide how to weight/remove a
     metric or compare/draft a prompt without going to read evaluation.py /
-    prompts.py directly. `contents`/`dates` are keyed the same way as
-    `active_items` (full ``*_score`` column names for metrics, prompt
-    values for prompts) so a lookup never mismatches.
-
-    `dates` is best-effort: a computed-not-judged metric (fk_normalized_score),
-    a standard metric/prompt (date_added: null in metrics.json/prompts.json),
-    or an unsaved this-session custom item all have no date to show, so the
-    caption is just omitted for those.
+    prompts.py directly. `contents` is keyed the same way as `active_items`
+    (full ``*_score`` column names for metrics, prompt values for prompts)
+    so a lookup never mismatches.
 
     Args:
         active_items: The currently-active metrics or prompts to choose from.
         contents: slug/prompt -> description or template text.
-        dates: slug/prompt -> ISO date string, only for entries that have one.
         kind: "metric" or "prompt" — used for the selectbox's session_state key.
         expander_title: e.g. "📋 View metric description".
         selectbox_label: e.g. "Metric".
         not_available: Fallback text when `chosen` isn't in `contents`.
         as_code: Render the content with st.code() (for a prompt template)
             instead of st.write() (for a metric's plain-text description).
+        format_func: How to render one item's label in the selectbox — same
+            "selection is the real item, this only changes the displayed
+            text" contract as _select_active_items. Metrics pass their
+            display-name lookup here; prompts (which have no separate
+            technical/display split) leave it at the identity default.
     """
     if not active_items:
         return
     with st.expander(expander_title):
-        chosen = st.selectbox(selectbox_label, active_items, key=f"view_{kind}_select")
+        chosen = st.selectbox(selectbox_label, active_items, key=f"view_{kind}_select", format_func=format_func)
         content = contents.get(chosen, not_available)
         if as_code:
             st.code(content, language=None)
         else:
             st.write(content)
-        if chosen in dates:
-            st.caption(f"Added: {dates[chosen]}")
 
 
 # ── Prompt management: remove (active-prompt toggle), add (live LLM) ────────
@@ -553,25 +660,42 @@ def _reattach_custom_prompts(df: pd.DataFrame, data_path: str, mtime: float, bas
     return normalise_fk_grade(pd.concat([df] + new_row_frames, ignore_index=True))
 
 
-def _render_add_prompt_form(df: pd.DataFrame, data_path: str, mtime: float, base_n_rows: int) -> None:
-    """Expander form to try one new prompt template against every unique text.
+def _render_add_prompt_form(
+    df: pd.DataFrame, data_path: str, mtime: float, base_n_rows: int,
+    active_metrics: list, metric_defs: dict,
+) -> None:
+    """Expander form to try one new prompt template, optionally on a sample of unique texts.
 
     Calls generate_new_prompt() (simplification.py): for every unique
-    original_text, one live OpenAI call to simplify it plus one live
-    Anthropic call to judge it on the standard dimensions — twice the API
-    surface of "Add a new metric", across two different providers/keys.
-    Gated behind the same explicit confirmation pattern for that reason.
+    original_text in the chosen sample (see _render_sample_controls()), one
+    live OpenAI call to simplify it plus one live Anthropic call to judge it
+    — twice the API surface of "Add a new metric", across two different
+    providers/keys. Gated behind the same explicit confirmation pattern for
+    that reason. A sampled prompt simply has fewer rows than one run on
+    every text — same as removing a prompt from "Active prompts" — nothing
+    downstream requires every prompt to cover every text.
+
+    Judges only whichever of `active_metrics` are governed by metrics.json
+    (not e.g. fk_normalized_score, which isn't LLM-judged) — exactly what's
+    currently selected in the "Active metrics" dropdown, never silently
+    "every metric that exists". There's no automatic judging anywhere in
+    this app: this button press, over this sample, judging this selection,
+    is the only way a new prompt's outputs get scored.
 
     A template only has {text} available (no country/recommending_body/type
-    — see simplify_text() in simplification.py for why), and any custom
-    metric added via "Add a new metric" won't be scored for this new
-    prompt's rows (only the standard dimensions are); both are noted in the
-    form so neither is a silent surprise.
+    — see simplify_text() in simplification.py for why); noted in the form
+    so it isn't a silent surprise.
     """
     with st.expander("➕ Add a new prompt (LLM simplify + judge)"):
         if not PROMPT_GENERATION_AVAILABLE:
             st.warning(f"Prompt generation unavailable: {PROMPT_GENERATION_IMPORT_ERROR}")
             return
+
+        dimensions = {
+            slug: entry["description"]
+            for slug, entry in metric_defs.items()
+            if f"{slug}_score" in active_metrics
+        }
 
         saved_defs = load_custom_prompt_definitions()
         picked = st.selectbox(
@@ -596,24 +720,32 @@ def _render_add_prompt_form(df: pd.DataFrame, data_path: str, mtime: float, base
                  "the built-in prompts in prompts.py.",
         )
         n_unique = df["original_text"].nunique()
+        sample_size, seed = _render_sample_controls(n_unique, "add_prompt", "unique texts")
+        sampled_texts = random.Random(seed).sample(df["original_text"].drop_duplicates().tolist(), sample_size)
+
+        if not dimensions:
+            st.info("No active metric is LLM-judged — select at least one in "
+                     "the sidebar's \"Active metrics\" dropdown to judge this prompt's output.")
+
         st.warning(
-            f"⚠️ **This costs money.** Trying this on all {n_unique} unique texts makes "
-            f"{n_unique} OpenAI calls ({SIMPLIFY_MODEL}) to simplify plus {n_unique} "
+            f"⚠️ **This costs money.** Trying this on {sample_size} unique text(s) makes "
+            f"{sample_size} OpenAI calls ({SIMPLIFY_MODEL}) to simplify plus {sample_size} "
             f"Anthropic calls ({EVAL_MODEL if LLM_JUDGE_AVAILABLE else 'the judge model'}) "
-            f"to score them — {2 * n_unique} live, billed calls total, taking a few "
-            f"minutes. Any custom metric added above won't be scored for this new "
-            f"prompt's rows.",
+            f"— one per text, judging {len(dimensions)} currently-active metric(s) — "
+            f"{2 * sample_size} live, billed calls total, taking a few minutes.",
             icon="💸",
         )
         confirmed = st.checkbox("I understand this spends API credits across two providers — go ahead")
 
-        if st.button("Generate prompt", disabled=not (name and template and confirmed)):
+        if st.button("Generate prompt", disabled=not (name and template and dimensions and confirmed)):
             progress = st.progress(0.0, text="Starting…")
             try:
                 slug = slugify(name)
+                sampled_df = df[df["original_text"].isin(sampled_texts)]
                 combined = generate_new_prompt(
-                    df.copy(), name, template,
+                    sampled_df.copy(), name, template,
                     on_progress=_progress_callback(progress, "texts done"),
+                    dimensions=dimensions,
                 )
             except Exception as e:  # noqa: BLE001 - surface any generation/judge/API failure to the user
                 st.error(f"Prompt generation failed: {e}")
@@ -690,8 +822,13 @@ _METRIC_EXPLANATIONS = {
 }
 
 
-def _render_metrics_list(row: pd.Series, score_columns: list) -> None:
-    """Render the `- metric = score — reason` bullet list shared by every sample view.
+def _render_metrics_list(row: pd.Series, score_columns: list, metric_names: dict) -> None:
+    """Render the `- Name = score — reason` bullet list shared by every sample view.
+
+    `metric_names` (see _build_metric_names()) is what keeps a technical
+    column like "obligations_complete_score" from ever being shown
+    verbatim — every caller down this chain gets it from main() rather
+    than re-deriving it.
 
     Falls back to _METRIC_EXPLANATIONS for metrics without their own
     `_reason` column, so a reader unfamiliar with e.g. the FK index still
@@ -705,10 +842,12 @@ def _render_metrics_list(row: pd.Series, score_columns: list) -> None:
             reason = row[reason_col]
         else:
             reason = _METRIC_EXPLANATIONS.get(metric, "—")
-        st.markdown(f"- `{metric}` = **{row[metric]}** — {reason}")
+        st.markdown(f"- **{metric_names.get(metric, metric)}** = **{row[metric]}** — {reason}")
 
 
-def _render_sample(row: pd.Series, score_columns: list, auto_format_original: bool = False) -> None:
+def _render_sample(
+    row: pd.Series, score_columns: list, metric_names: dict, auto_format_original: bool = False,
+) -> None:
     """Render one sample row: original/simplified stacked, then metrics below.
 
     Args:
@@ -726,10 +865,12 @@ def _render_sample(row: pd.Series, score_columns: list, auto_format_original: bo
     if "transcribed_text" in row.index:
         st.markdown(f"**Simplified:** {row['transcribed_text']}")
 
-    _render_metrics_list(row, score_columns)
+    _render_metrics_list(row, score_columns, metric_names)
 
 
-def _render_sample_side_by_side(row: pd.Series, score_columns: list, auto_format_original: bool = False) -> None:
+def _render_sample_side_by_side(
+    row: pd.Series, score_columns: list, metric_names: dict, auto_format_original: bool = False,
+) -> None:
     """Render one sample row: original/simplified in two columns, metrics below.
 
     Used by the Sanity Check and Verify Best Prompt tabs, where reading the
@@ -757,7 +898,7 @@ def _render_sample_side_by_side(row: pd.Series, score_columns: list, auto_format
             st.markdown("**Simplified**")
             st.markdown(row["transcribed_text"])
 
-    _render_metrics_list(row, score_columns)
+    _render_metrics_list(row, score_columns, metric_names)
 
 
 # ── Step 1: metric variance ────────────────────────────────────────────────
@@ -779,7 +920,8 @@ def _deactivate_metric(metric: str) -> None:
 
 
 def render_metric_variance_tab(
-    df: pd.DataFrame, score_columns: list, n_samples: int, auto_format_original: bool = False
+    df: pd.DataFrame, score_columns: list, metric_names: dict, metric_descriptions: dict, n_samples: int,
+    auto_format_original: bool = False,
 ) -> None:
     threshold = st.slider(
         "Low-variance threshold", min_value=0.0, max_value=0.25, step=0.01,
@@ -789,7 +931,10 @@ def render_metric_variance_tab(
     )
     result = check_metric_variance(df, score_columns, threshold=threshold, n_samples=n_samples, verbose=False)
 
-    st.bar_chart(result["variances"])
+    # Renamed for display only — result["variances"]/["low_variance_metrics"]
+    # keep the real column names, since those still drive the remove button's
+    # on_click target below.
+    st.bar_chart(result["variances"].rename(lambda col: metric_names.get(col, col)))
 
     if not result["low_variance_metrics"]:
         st.success("All metrics have sufficient variance — no candidates for removal.")
@@ -797,25 +942,79 @@ def render_metric_variance_tab(
 
     for metric in result["low_variance_metrics"]:
         var = result["variances"][metric]
-        with st.expander(f"⚠️ '{metric}' has low variance ({var:.4f})", expanded=False):
-            st.write("Nearly constant score across all outputs. If the samples "
-                     "below look reasonable, consider removing this metric.")
+        name = metric_names.get(metric, metric)
+        with st.expander(f"⚠️ '{name}' has low variance ({var:.4f})", expanded=False):
+            # The judge question itself, not sample rows — those are one click
+            # away on the Sanity Check tab, and showing both here was
+            # redundant with that tab's whole purpose.
+            st.write(metric_descriptions.get(metric, "_No description available for this metric._"))
+            st.caption("Nearly constant score across all outputs. See the **Sanity Check** "
+                       "tab for example outputs across all metrics, then decide whether to remove this one.")
             st.button(
-                f"🗑️ Remove '{metric}' from active metrics",
+                f"🗑️ Remove '{name}' from active metrics",
                 key=f"remove_{metric}",
                 on_click=_deactivate_metric,
                 args=(metric,),
             )
-            for _, row in result["samples"][metric].iterrows():
-                _render_sample(row, [metric], auto_format_original)
-                st.divider()
 
 
-# ── Step 2: sanity check ───────────────────────────────────────────────────
+# ── Step 2: metric covariance ────────────────────────────────────────────────
+
+
+def render_metric_covariance_tab(
+    df: pd.DataFrame, score_columns: list, metric_names: dict, metric_descriptions: dict, n_samples: int,
+    auto_format_original: bool = False,
+) -> None:
+    threshold = st.slider(
+        "High-covariance threshold", min_value=0.0, max_value=1.0, step=0.05,
+        key="covariance_threshold",
+        help="Two metrics correlated above this (in either direction) tend "
+             "to agree almost every time — one adds little signal beyond "
+             "the other and is a candidate for removal.",
+    )
+    result = check_metric_covariance(df, score_columns, threshold=threshold, verbose=False)
+
+    display_corr = result["correlations"].rename(
+        index=lambda col: metric_names.get(col, col), columns=lambda col: metric_names.get(col, col),
+    )
+    st.dataframe(display_corr.style.format("{:.2f}", na_rep="—"))
+
+    if not result["high_covariance_pairs"]:
+        st.success("No metric pair is highly correlated — no redundancy candidates.")
+        return
+
+    for metric_a, metric_b, corr in result["high_covariance_pairs"]:
+        name_a, name_b = metric_names.get(metric_a, metric_a), metric_names.get(metric_b, metric_b)
+        with st.expander(f"⚠️ '{name_a}' and '{name_b}' are highly correlated ({corr:.2f})", expanded=False):
+            st.caption("These two tend to agree almost every time — one adds little "
+                       "over the other. Consider removing one, or merging them into "
+                       "a single judge question.")
+            desc_col_a, desc_col_b = st.columns(2)
+            with desc_col_a:
+                st.markdown(f"**{name_a}**")
+                st.write(metric_descriptions.get(metric_a, "_No description available for this metric._"))
+            with desc_col_b:
+                st.markdown(f"**{name_b}**")
+                st.write(metric_descriptions.get(metric_b, "_No description available for this metric._"))
+            remove_col_a, remove_col_b = st.columns(2)
+            with remove_col_a:
+                st.button(
+                    f"🗑️ Remove '{name_a}'", key=f"remove_covar_{metric_a}_{metric_b}_a",
+                    on_click=_deactivate_metric, args=(metric_a,),
+                )
+            with remove_col_b:
+                st.button(
+                    f"🗑️ Remove '{name_b}'", key=f"remove_covar_{metric_a}_{metric_b}_b",
+                    on_click=_deactivate_metric, args=(metric_b,),
+                )
+
+
+# ── Step 3: sanity check ───────────────────────────────────────────────────
 
 
 def render_sanity_check_tab(
-    df: pd.DataFrame, score_columns: list, n_samples: int, auto_format_original: bool = False
+    df: pd.DataFrame, score_columns: list, metric_names: dict, n_samples: int,
+    auto_format_original: bool = False,
 ) -> None:
     # show_sanity_samples() isn't cached, so it draws a fresh random sample on
     # every script rerun; a button click is just the conventional way to
@@ -823,15 +1022,16 @@ def render_sanity_check_tab(
     st.button("🔀 Resample")
     sample = show_sanity_samples(df, score_columns, n_samples=n_samples, verbose=False)
     for _, row in sample.iterrows():
-        _render_sample_side_by_side(row, score_columns, auto_format_original)
+        _render_sample_side_by_side(row, score_columns, metric_names, auto_format_original)
         st.divider()
 
 
-# ── Step 3: prompt comparison ───────────────────────────────────────────────
+# ── Step 4: prompt comparison ───────────────────────────────────────────────
 
 
 def render_prompt_comparison_tab(
-    df: pd.DataFrame, score_columns: list, n_samples: int, auto_format_original: bool = False
+    df: pd.DataFrame, score_columns: list, metric_names: dict, n_samples: int,
+    auto_format_original: bool = False,
 ) -> pd.DataFrame:
     threshold = st.slider(
         "High-variance threshold", min_value=0.0, max_value=0.25, step=0.01,
@@ -870,17 +1070,17 @@ def render_prompt_comparison_tab(
                 args=(prompt,),
             )
             for _, row in sample.iterrows():
-                _render_sample(row, score_columns, auto_format_original)
+                _render_sample(row, score_columns, metric_names, auto_format_original)
                 st.divider()
 
     return stats
 
 
-# ── Step 4: verify best prompt ──────────────────────────────────────────────
+# ── Step 5: verify best prompt ──────────────────────────────────────────────
 
 
 def render_verify_best_prompt_tab(
-    df: pd.DataFrame, prompt_stats: pd.DataFrame, score_columns: list, n_samples: int,
+    df: pd.DataFrame, prompt_stats: pd.DataFrame, score_columns: list, metric_names: dict, n_samples: int,
     auto_format_original: bool = False,
 ) -> None:
     if prompt_stats is None:
@@ -895,7 +1095,7 @@ def render_verify_best_prompt_tab(
     st.metric("Best prompt", result["best_prompt"], f"mean score {result['mean_score']:.3f}")
     st.write("Read the outputs below — does this look like good simplification?")
     for _, row in result["samples"].iterrows():
-        _render_sample_side_by_side(row, score_columns, auto_format_original)
+        _render_sample_side_by_side(row, score_columns, metric_names, auto_format_original)
         st.divider()
 
 
@@ -905,9 +1105,10 @@ def render_verify_best_prompt_tab(
 # here and one render_* function above — nothing else changes.
 STEPS = [
     ("1. Metric Variance", render_metric_variance_tab),
-    ("2. Sanity Check", render_sanity_check_tab),
-    ("3. Prompt Comparison", render_prompt_comparison_tab),
-    ("4. Verify Best Prompt", render_verify_best_prompt_tab),
+    ("2. Metric Covariance", render_metric_covariance_tab),
+    ("3. Sanity Check", render_sanity_check_tab),
+    ("4. Prompt Comparison", render_prompt_comparison_tab),
+    ("5. Verify Best Prompt", render_verify_best_prompt_tab),
 ]
 
 
@@ -952,6 +1153,10 @@ def main() -> None:
             "high_variance_threshold",
             saved_settings.get("high_variance_threshold", HIGH_VARIANCE_THRESHOLD),
         )
+        st.session_state.setdefault(
+            "covariance_threshold",
+            saved_settings.get("covariance_threshold", HIGH_COVARIANCE_THRESHOLD),
+        )
 
         n_samples = st.slider("Samples to show", 1, 10, key="n_samples")
         auto_format_original = st.checkbox(
@@ -965,40 +1170,65 @@ def main() -> None:
         df = load_data(data_path, mtime).copy()
         df = _reattach_custom_metrics(df, data_path, mtime)
         base_n_rows = len(df)  # true base row count, before any generated-prompt rows
+
+        # metrics.json is the ground source of truth for which metrics exist —
+        # every entry gets a column here (NaN-filled if this particular CSV
+        # hasn't been judged on it yet), rather than discovering metrics
+        # purely by sniffing which "*_score" columns the CSV happens to have.
+        # That CSV-only approach had no way to show a metrics.json entry with
+        # zero data in it (a brand-new standard dimension, or one added
+        # before this CSV existed) — it could only ever show what had
+        # already been judged, silently out of step with metrics.json
+        # whenever the two didn't already agree. A column metrics.json
+        # doesn't govern at all (e.g. fk_normalized_score, which is locally
+        # computed, not LLM-judged) is untouched here and picked up below by
+        # get_score_columns(df) same as always.
+        metric_defs = load_all_metric_definitions() if LLM_JUDGE_AVAILABLE else {}
+        for slug, entry in metric_defs.items():
+            if not entry.get("active", True):
+                continue  # retired: show only if this CSV already has real data for it
+            col = f"{slug}_score"
+            if col not in df.columns:
+                df[col] = float("nan")
+                df[f"{slug}_reason"] = None
+
+        # done/total judged rows for each ACTIVE metrics.json entry (standard
+        # or custom) — retired (active: false) entries are excluded here on
+        # purpose: "not judged" is expected for them, not something to warn
+        # about or offer to fix. Computed now, while df is still exactly the
+        # base rows (no generated-prompt rows appended yet), so "total" means
+        # what "full dataset" actually says.
+        metric_coverage = {
+            f"{slug}_score": (int(df[f"{slug}_score"].notna().sum()), base_n_rows)
+            for slug, entry in metric_defs.items()
+            if entry.get("active", True)
+        }
+
         df = _reattach_custom_prompts(df, data_path, mtime, base_n_rows)
         all_metrics = get_score_columns(df)
         all_prompts = sorted(df["prompt"].unique())
+        metric_names = _build_metric_names(all_metrics, metric_defs)
 
         # Built from whatever's currently available, for the "view" panels below —
         # not from active_metrics/active_prompts, so a deselected item can still be
         # inspected before deciding whether to bring it back.
         metric_descriptions = dict(_METRIC_EXPLANATIONS)
-        metric_dates = {}
         if LLM_JUDGE_AVAILABLE:
-            # Standard and custom metrics live together in one file,
-            # metrics.json (next to evaluation.py) — load_all_metric_definitions()
-            # reads both at once, no separate merge step needed. Standard
-            # entries have date_added: null there, which entry.get() below
-            # correctly skips rather than showing a bogus date.
+            # All metric definitions live together in one file, metrics.json
+            # (next to evaluation.py) — load_all_metric_definitions() reads
+            # them all at once, no separate merge step needed.
             for slug, entry in load_all_metric_definitions().items():
                 metric_descriptions[f"{slug}_score"] = entry["description"]
-                if entry.get("date_added"):
-                    metric_dates[f"{slug}_score"] = entry["date_added"]
         for slug, meta in st.session_state.get("custom_metrics", {}).items():
             metric_descriptions[f"{slug}_score"] = meta["description"]
 
         # Standard and custom prompts live together in one file, prompts.json
         # (next to prompts.py) — load_all_prompt_definitions() reads both at
         # once. No PROMPT_GENERATION_AVAILABLE guard needed here: unlike
-        # generating a prompt, reading definitions needs no OpenAI/Anthropic
-        # key. Standard entries have date_added: null, which entry.get()
-        # below correctly skips rather than showing a bogus date.
+        # generating a prompt, reading definitions needs no OpenAI/Anthropic key.
         prompt_templates = {}
-        prompt_dates = {}
         for slug, entry in load_all_prompt_definitions().items():
             prompt_templates[slug] = entry["template"]
-            if entry.get("date_added"):
-                prompt_dates[slug] = entry["date_added"]
         for slug, meta in st.session_state.get("custom_prompts", {}).items():
             prompt_templates[slug] = meta["template"]
 
@@ -1020,14 +1250,17 @@ def main() -> None:
             help_text="Deselect a metric to exclude it from the weighted average, "
                       "variance chart, and prompt comparison. It stays in the data "
                       "and can be reselected any time.",
+            format_func=lambda col: _metric_option_label(col, metric_coverage, metric_names),
         )
+        _render_run_missing_metrics_section(df, data_path, base_n_rows, metric_defs, metric_coverage)
         _render_add_metric_form(df, data_path, mtime)
         _render_save_metrics_section(data_path, base_n_rows)
         _render_clear_button("custom_metrics", "custom metrics")
         _render_definition_viewer(
-            active_metrics, metric_descriptions, metric_dates,
+            active_metrics, metric_descriptions,
             kind="metric", expander_title="📋 View metric description", selectbox_label="Metric",
             not_available="_No description available for this metric._",
+            format_func=lambda col: metric_names.get(col, col),
         )
 
         st.caption("Higher weight = more influence on a prompt's average score.")
@@ -1037,7 +1270,10 @@ def main() -> None:
             weight_key = f"weight_{col}"
             default_weight = 5.0 if col in _READABILITY_METRICS else 1.0
             st.session_state.setdefault(weight_key, saved_weights.get(col, default_weight))
-            weights[col] = st.slider(col, 0.0, 10.0, step=0.5, key=weight_key)
+            weights[col] = st.slider(
+                metric_names.get(col, col), 0.0, 10.0, step=0.5, key=weight_key,
+                help=metric_descriptions.get(col),
+            )
 
         st.header("Prompts")
         active_prompts = _select_active_items(
@@ -1045,11 +1281,11 @@ def main() -> None:
             help_text="Deselect a prompt to exclude all its rows from the variance "
                       "chart and prompt comparison. Data stays put; reselect any time.",
         )
-        _render_add_prompt_form(df, data_path, mtime, base_n_rows)
+        _render_add_prompt_form(df, data_path, mtime, base_n_rows, active_metrics, metric_defs)
         _render_save_prompts_section(data_path, base_n_rows)
         _render_clear_button("custom_prompts", "added prompts")
         _render_definition_viewer(
-            active_prompts, prompt_templates, prompt_dates,
+            active_prompts, prompt_templates,
             kind="prompt", expander_title="📋 View prompt template", selectbox_label="Prompt",
             not_available="No template available for this prompt.", as_code=True,
         )
@@ -1062,6 +1298,7 @@ def main() -> None:
                 "auto_format_original": auto_format_original,
                 "low_variance_threshold": st.session_state["low_variance_threshold"],
                 "high_variance_threshold": st.session_state["high_variance_threshold"],
+                "covariance_threshold": st.session_state["covariance_threshold"],
                 "active_metrics": active_metrics,
                 "known_metrics": all_metrics,
                 "active_prompts": active_prompts,
@@ -1084,13 +1321,15 @@ def main() -> None:
     prompt_stats = st.session_state.get("prompt_stats")
     for (_, render), tab in zip(STEPS, tabs):
         with tab:
-            if render is render_prompt_comparison_tab:
-                prompt_stats = render(df, active_metrics, n_samples, auto_format_original)
+            if render in (render_metric_variance_tab, render_metric_covariance_tab):
+                render(df, active_metrics, metric_names, metric_descriptions, n_samples, auto_format_original)
+            elif render is render_prompt_comparison_tab:
+                prompt_stats = render(df, active_metrics, metric_names, n_samples, auto_format_original)
                 st.session_state["prompt_stats"] = prompt_stats
             elif render is render_verify_best_prompt_tab:
-                render(df, prompt_stats, active_metrics, n_samples, auto_format_original)
+                render(df, prompt_stats, active_metrics, metric_names, n_samples, auto_format_original)
             else:
-                render(df, active_metrics, n_samples, auto_format_original)
+                render(df, active_metrics, metric_names, n_samples, auto_format_original)
 
 
 if __name__ == "__main__":

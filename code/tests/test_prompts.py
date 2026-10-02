@@ -5,14 +5,12 @@ Run from code/:
 """
 
 import json
-from datetime import date
 
 import pytest
 
 from src.prompts import (
     PROMPTS,
     load_all_prompt_definitions,
-    load_active_prompt_definitions,
     load_custom_prompt_definitions,
     save_custom_prompt_definition,
     set_prompt_active,
@@ -30,8 +28,8 @@ def test_load_custom_prompt_definitions_empty_when_file_missing(tmp_path):
 def test_load_custom_prompt_definitions_excludes_standard_entries(tmp_path):
     path = tmp_path / "prompts.json"
     path.write_text(json.dumps({
-        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "date_added": None},
-        "bullet_points": {"name": "Bullet Points", "template": "t2", "standard": False, "date_added": "2026-09-13"},
+        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True},
+        "bullet_points": {"name": "Bullet Points", "template": "t2", "standard": False},
     }))
     custom_only = load_custom_prompt_definitions(path)
     assert set(custom_only) == {"bullet_points"}
@@ -40,25 +38,15 @@ def test_load_custom_prompt_definitions_excludes_standard_entries(tmp_path):
 
 def test_save_then_load_custom_prompt_definition_roundtrips(tmp_path):
     path = tmp_path / "prompts.json"
-    save_custom_prompt_definition(
-        "bullet_points", "Bullet Points", "Rewrite as bullets: {text}", path, date_added="2026-09-13"
-    )
+    save_custom_prompt_definition("bullet_points", "Bullet Points", "Rewrite as bullets: {text}", path)
     assert load_custom_prompt_definitions(path) == {
         "bullet_points": {
             "name": "Bullet Points",
             "template": "Rewrite as bullets: {text}",
             "standard": False,
             "active": True,
-            "date_added": "2026-09-13",
         }
     }
-
-
-def test_save_custom_prompt_definition_defaults_date_added_to_today(tmp_path):
-    path = tmp_path / "prompts.json"
-    save_custom_prompt_definition("bullet_points", "Bullet Points", "t", path)
-    saved = load_custom_prompt_definitions(path)["bullet_points"]
-    assert saved["date_added"] == date.today().isoformat()
 
 
 def test_save_custom_prompt_definition_merges_without_clobbering(tmp_path):
@@ -83,9 +71,9 @@ def test_save_custom_prompt_definition_preserves_standard_entries(tmp_path):
     # the standard 5 that live in the same prompts.json.
     path = tmp_path / "prompts.json"
     path.write_text(json.dumps({
-        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "date_added": None},
+        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True},
     }))
-    save_custom_prompt_definition("bullet_points", "Bullet Points", "t2", path, date_added="2026-09-18")
+    save_custom_prompt_definition("bullet_points", "Bullet Points", "t2", path)
     all_defs = load_all_prompt_definitions(path)
     assert "prompt_felix" in all_defs and all_defs["prompt_felix"]["standard"] is True
     assert "bullet_points" in all_defs and all_defs["bullet_points"]["standard"] is False
@@ -100,44 +88,26 @@ def test_prompts_excludes_custom_prompts():
         assert load_all_prompt_definitions()[slug]["standard"] is True
 
 
-def test_load_active_prompt_definitions_excludes_retired_entries(tmp_path):
-    path = tmp_path / "prompts.json"
-    path.write_text(json.dumps({
-        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "active": False, "date_added": None},
-        "summarise": {"name": "summarise", "template": "t2", "standard": True, "active": True, "date_added": None},
-    }))
-    assert set(load_active_prompt_definitions(path)) == {"summarise"}
-    # load_all_prompt_definitions() is unfiltered — the retired entry survives there.
-    assert "prompt_felix" in load_all_prompt_definitions(path)
-
-
-def test_load_active_prompt_definitions_treats_missing_flag_as_active(tmp_path):
-    path = tmp_path / "prompts.json"
-    path.write_text(json.dumps({
-        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "date_added": None},
-    }))
-    assert set(load_active_prompt_definitions(path)) == {"prompt_felix"}
-
-
 def test_set_prompt_active_retires_without_deleting(tmp_path):
     path = tmp_path / "prompts.json"
     path.write_text(json.dumps({
-        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "active": True, "date_added": None},
+        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "active": True},
     }))
     set_prompt_active("prompt_felix", False, path)
     all_defs = load_all_prompt_definitions(path)
     assert all_defs["prompt_felix"]["active"] is False
+    # Everything else survives, and the entry is never dropped from load_all.
     assert all_defs["prompt_felix"]["template"] == "t"
-    assert "prompt_felix" not in load_active_prompt_definitions(path)
+    assert "prompt_felix" in all_defs
 
 
 def test_set_prompt_active_can_reactivate(tmp_path):
     path = tmp_path / "prompts.json"
     path.write_text(json.dumps({
-        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "active": False, "date_added": None},
+        "prompt_felix": {"name": "prompt_felix", "template": "t", "standard": True, "active": False},
     }))
     set_prompt_active("prompt_felix", True, path)
-    assert "prompt_felix" in load_active_prompt_definitions(path)
+    assert load_all_prompt_definitions(path)["prompt_felix"]["active"] is True
 
 
 def test_set_prompt_active_raises_for_unknown_slug(tmp_path):
@@ -158,12 +128,9 @@ if __name__ == "__main__":
         test_load_custom_prompt_definitions_empty_when_file_missing,
         test_load_custom_prompt_definitions_excludes_standard_entries,
         test_save_then_load_custom_prompt_definition_roundtrips,
-        test_save_custom_prompt_definition_defaults_date_added_to_today,
         test_save_custom_prompt_definition_merges_without_clobbering,
         test_save_custom_prompt_definition_overwrites_same_slug,
         test_save_custom_prompt_definition_preserves_standard_entries,
-        test_load_active_prompt_definitions_excludes_retired_entries,
-        test_load_active_prompt_definitions_treats_missing_flag_as_active,
         test_set_prompt_active_retires_without_deleting,
         test_set_prompt_active_can_reactivate,
         test_set_prompt_active_raises_for_unknown_slug,
