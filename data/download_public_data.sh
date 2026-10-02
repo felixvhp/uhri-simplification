@@ -14,7 +14,7 @@ fi
 case "$1" in
     --json)
         echo "Downloading JSON file..."
-        curl -o export-full-en.json https://dataex.ohchr.org/uhri/export-results/export-full-en.json
+        curl -o export_full_en.json https://dataex.ohchr.org/uhri/export-results/export-full-en.json
         echo "JSON file downloaded successfully."
         ;;
     --xlsx)

@@ -47,6 +47,7 @@ Resumption:
 """
 
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -79,11 +80,12 @@ from src.prompt_improvement_workflow import (
 from src.prompts import load_all_prompt_definitions, load_custom_prompt_definitions, save_custom_prompt_definition
 from src.text_utils import format_legal_bullets, slugify
 
-# evaluation.py and simplification.py each build a live API client (Anthropic,
-# OpenAI respectively) at import time, and raise if the matching key isn't
-# configured. The rest of this GUI (weights, removing metrics, the four
-# report tabs) needs neither, so both are imported defensively — each import
-# failure only disables its one "add a new ..." form, not the whole app.
+# evaluation.py and simplification.py each talk to a live API (Anthropic,
+# OpenAI respectively). The rest of this GUI (weights, removing metrics, the
+# four report tabs) needs neither, so both are imported defensively — each
+# import failure only disables its one "add a new ..." form, not the whole app.
+# simplification.py builds its OpenAI client lazily, so a missing
+# OPENAI_API_KEY no longer fails the import — it's checked explicitly below.
 # prompts.py's prompts.json loading (above) has no such dependency, so it's
 # imported unconditionally — the "view prompt template" panel works either way.
 # EVAL_DIMENSIONS/metrics.json loading live in evaluation.py (both standard
@@ -106,8 +108,9 @@ except Exception as e:  # noqa: BLE001 - deliberately broad, see comment above
 
 try:
     from src.simplification import generate_new_prompt, save_custom_prompt_rows_to_csv, MODEL as SIMPLIFY_MODEL
-    PROMPT_GENERATION_AVAILABLE = True
-    PROMPT_GENERATION_IMPORT_ERROR = None
+    # simplification.py's load_dotenv() has run by now, so .env keys are visible here.
+    PROMPT_GENERATION_AVAILABLE = bool(os.environ.get("OPENAI_API_KEY"))
+    PROMPT_GENERATION_IMPORT_ERROR = None if PROMPT_GENERATION_AVAILABLE else "OPENAI_API_KEY is not set"
 except Exception as e:  # noqa: BLE001 - deliberately broad, see comment above
     PROMPT_GENERATION_AVAILABLE = False
     PROMPT_GENERATION_IMPORT_ERROR = str(e)

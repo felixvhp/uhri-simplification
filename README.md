@@ -54,7 +54,7 @@ that button is enabled.
 
 A custom metric added this way lives only in the browser session until you
 hit "💾 Save" next to it: that writes its judge question into
-`code/src/custom_metrics.json` (tracked in git — shared with anyone who
+`code/src/metrics.json` (tracked in git — shared with anyone who
 pulls the repo) and its computed scores into the loaded CSV in place
 (`data/` is gitignored, so that part stays local to your machine). After
 saving, it's an ordinary column the next time the CSV loads — the "Add a

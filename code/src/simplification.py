@@ -63,7 +63,15 @@ FULL_TESTS = True
 SAMPLE_SIZE = None   # None = evaluate on all records; set an int to draw a random subset
 RANDOM_SEED = 42     # fixes which records get sampled, so runs are reproducible
 
-openai_client = OpenAI()
+openai_client: Optional[OpenAI] = None  # built on first use, so importing needs no API key
+
+
+def _get_openai_client() -> OpenAI:
+    """Return the shared OpenAI client, creating it on first call."""
+    global openai_client
+    if openai_client is None:
+        openai_client = OpenAI()
+    return openai_client
 
 
 class _MissingContext(dict):
@@ -80,7 +88,7 @@ class _MissingContext(dict):
 
 def _call_openai(prompt: str, model: str) -> str:
     """Send a fully-built prompt to OpenAI and return the generated text."""
-    response = openai_client.responses.create(
+    response = _get_openai_client().responses.create(
         model=model,
         input=prompt,
         reasoning={"effort": "medium"},  # "minimal" | "low" | "medium" | "high"

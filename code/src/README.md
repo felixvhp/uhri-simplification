@@ -12,7 +12,7 @@ the codebase and the decisions made while building it.
 
 ```bash
 cd code
-source ~/Documents/Venvs/un_project/bin/activate   # or your own venv — see pip install below
+source ../venv/bin/activate                        # see docs/skills/activate-venv.md
 pip install -r requirements.txt                    # first time only
 streamlit run src/prompt_improvement_app.py
 ```
@@ -353,10 +353,6 @@ assert not at.exception
   look like another mergeable pair, but their underlying save-function
   signatures differ more than the other merged pairs did — flagged, not
   merged, since the risk/value tradeoff was judged worse.
-- The top-level `README.md`'s "Running the Prompt Improvement GUI"
-  section predates the `metrics.json`/`prompts.json` unification and
-  still mentions `code/src/custom_metrics.json`, which no longer exists —
-  worth updating there too.
 - Saving a pending custom prompt appends rows, changing the CSV's row
   count — which retires any *other* still-unsaved custom metric or prompt
   (their stored base row count no longer matches). Saving a metric only
