@@ -142,6 +142,30 @@ possible — with a backup taken first.
    `"<dim>__score"` (double underscore), but `_build_row()` flattens
    `score_simplification()`'s `"__"` to `"_"` — so those weights would
    have silently matched no column and done nothing.
+8. **Reconciled "what the GUI shows" with "what metrics.json defines"**:
+   the GUI's metric list used to be just `get_score_columns(df)` — every
+   `*_score` column the loaded CSV happened to have, regardless of whether
+   `metrics.json` still considered it current. After the 5->9 dimension
+   switch above, that meant the GUI kept showing the 5 retired dimensions
+   forever on any CSV computed before the switch (orphaned, no
+   description available), while a freshly re-judged CSV wouldn't show
+   them at all — two different "truths" depending on which file happened
+   to be loaded. Fixed by:
+   - Added `"active": true/false` to every `metrics.json`/`prompts.json`
+     entry (`DefinitionsStore.load_active()`/`set_active()`). An entry is
+     never deleted to retire it — `active: false` keeps its description
+     and history. Restored the original 5 dimensions into `metrics.json`
+     (recovered via git history) as `active: false`, rather than leaving
+     them gone for good.
+   - `EVAL_DIMENSIONS`/`PROMPTS` now filter on `standard AND active`
+     instead of just `standard`.
+   - The GUI's metric list (`_get_available_metric_columns()` in
+     `prompt_improvement_app.py`) now reconciles the two: a column
+     `metrics.json` governs must also be `active` there to be offered; a
+     column it doesn't govern at all (e.g. `fk_normalized_score`, which is
+     locally computed, not LLM-judged) is always offered, same as before.
+     Both "what gets judged on new data" and "what the GUI offers" now
+     read the exact same `active` flag off the exact same file.
 
 Every step was verified with `python -m py_compile`, a full headless
 `AppTest` boot (zero exceptions), targeted functional checks (remove
@@ -172,9 +196,13 @@ assert not at.exception
 
 ## Known gaps / not yet done
 
-- `definitions_store.py` has no test file of its own — it's only
-  exercised indirectly through `evaluation.py`'s and `prompts.py`'s
-  wrapper-function tests.
+- `data/cleaned.csv` (the GUI's default CSV path) still only has the
+  *retired* 5 dimensions' score columns — it predates the 9-dimension
+  judge and hasn't been re-run against it. A 9-record sample pass has
+  been run against `data/email_recs.xlsx` and saved to
+  `data/cleaned_sample10.csv` (point the GUI's sidebar CSV path there to
+  see the new dimensions live); re-running the full pass over
+  `data/cleaned.csv` is still outstanding.
 - `_render_save_metrics_section`/`_render_save_prompts_section` (GUI)
   look like another mergeable pair, but their underlying save-function
   signatures differ more than the other merged pairs did — flagged, not

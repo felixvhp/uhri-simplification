@@ -14,9 +14,11 @@ from src.evaluation import (
     evaluate,
     evaluate_new_metric,
     load_all_metric_definitions,
+    load_active_metric_definitions,
     load_custom_metric_definitions,
     save_custom_metric_definition,
     save_custom_metric_scores_to_csv,
+    set_metric_active,
     EVAL_DIMENSIONS,
 )
 
@@ -237,6 +239,7 @@ def test_save_then_load_custom_metric_definition_roundtrips(tmp_path):
             "name": "Tone: formal?",
             "description": "Is it formal?",
             "standard": False,
+            "active": True,
             "date_added": "2026-09-13",
         }
     }
@@ -287,6 +290,67 @@ def test_eval_dimensions_excludes_custom_metrics():
     assert set(EVAL_DIMENSIONS) <= set(load_all_metric_definitions())
     for slug in EVAL_DIMENSIONS:
         assert load_all_metric_definitions()[slug]["standard"] is True
+
+
+def test_eval_dimensions_excludes_retired_standard_metrics():
+    # A standard metric retired via set_metric_active(slug, False) (e.g. one
+    # of the original 5, dropped when the judge moved to 9 fine-grained
+    # dimensions) must never show up in EVAL_DIMENSIONS, even though it's
+    # still `standard: true` and still in metrics.json.
+    for slug, entry in load_all_metric_definitions().items():
+        if entry.get("standard") and not entry.get("active", True):
+            assert slug not in EVAL_DIMENSIONS
+
+
+def test_load_active_metric_definitions_excludes_retired_entries(tmp_path):
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({
+        "content_preserved": {"name": "content_preserved", "description": "d", "standard": True, "active": False, "date_added": None},
+        "obligations_complete": {"name": "obligations_complete", "description": "d2", "standard": True, "active": True, "date_added": None},
+    }))
+    active = load_active_metric_definitions(path)
+    assert set(active) == {"obligations_complete"}
+    # load_all_metric_definitions() is unfiltered — the retired entry survives there.
+    assert "content_preserved" in load_all_metric_definitions(path)
+
+
+def test_load_active_metric_definitions_treats_missing_flag_as_active(tmp_path):
+    # Entries written before the "active" field existed have no such key —
+    # they must default to active rather than disappearing.
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({
+        "content_preserved": {"name": "content_preserved", "description": "d", "standard": True, "date_added": None},
+    }))
+    assert set(load_active_metric_definitions(path)) == {"content_preserved"}
+
+
+def test_set_metric_active_retires_without_deleting(tmp_path):
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({
+        "content_preserved": {"name": "content_preserved", "description": "d", "standard": True, "active": True, "date_added": None},
+    }))
+    set_metric_active("content_preserved", False, path)
+    all_defs = load_all_metric_definitions(path)
+    assert all_defs["content_preserved"]["active"] is False
+    # Everything else about the entry survives untouched.
+    assert all_defs["content_preserved"]["description"] == "d"
+    assert "content_preserved" not in load_active_metric_definitions(path)
+
+
+def test_set_metric_active_can_reactivate(tmp_path):
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({
+        "content_preserved": {"name": "content_preserved", "description": "d", "standard": True, "active": False, "date_added": None},
+    }))
+    set_metric_active("content_preserved", True, path)
+    assert "content_preserved" in load_active_metric_definitions(path)
+
+
+def test_set_metric_active_raises_for_unknown_slug(tmp_path):
+    path = tmp_path / "metrics.json"
+    path.write_text(json.dumps({}))
+    with pytest.raises(KeyError):
+        set_metric_active("does_not_exist", False, path)
 
 
 def test_save_custom_metric_scores_to_csv_writes_new_columns(tmp_path):

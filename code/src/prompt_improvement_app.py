@@ -109,8 +109,10 @@ Resumption — how to scale this up when it outgrows a single file:
     - New step: write one `render_<step>_tab(...)` function below and add one
       more entry to the `STEPS` list. Nothing else needs to change.
     - New metric in the CSV: no code change needed — weight sliders and
-      variance tables are generated from `get_score_columns(df)`, so a new
-      `*_score` column just shows up.
+      variance tables are generated from `_get_available_metric_columns(df)`,
+      which offers a `*_score` column as long as metrics.json doesn't mark
+      it retired (`active: false`); an ungoverned column (not in
+      metrics.json at all) always shows up as before.
     - Growing past a handful of steps/tabs: split each render_* function out
       into its own module under src/gui/ and import them here; `st.tabs` can
       be swapped for `st.navigation`/multipage app structure without touching
@@ -165,6 +167,7 @@ try:
     from src.evaluation import (
         evaluate_new_metric,
         load_all_metric_definitions,
+        load_active_metric_definitions,
         load_custom_metric_definitions,
         save_custom_metric_definition,
         save_custom_metric_scores_to_csv,
@@ -300,6 +303,38 @@ def _reattach_custom_metrics(df: pd.DataFrame, data_path: str, mtime: float) -> 
         df[f"{slug}_score"] = meta["scores"]
         df[f"{slug}_reason"] = meta["reasons"]
     return df
+
+
+def _get_available_metric_columns(df: pd.DataFrame) -> list:
+    """Score columns the GUI should offer as metrics, reconciled with metrics.json.
+
+    Before this, the GUI's metric list was just get_score_columns(df) — every
+    `*_score` column the loaded CSV happened to have, with no regard for
+    whether metrics.json still considers it current. That let a retired
+    metric (e.g. one of the 5 dimensions dropped in the 9-dimension judge
+    rewrite) keep showing up forever in any CSV computed before the
+    retirement, silently out of sync with metrics.json.
+
+    A column now has to clear two gates to be offered:
+      1. If metrics.json governs it at all (i.e. some slug + "_score"
+         matches this column), it must be marked active there.
+      2. The loaded CSV must actually have that column — metrics.json can
+         define a metric with no data in this particular file yet (e.g.
+         right after the 5->9 switch, before re-running the judge).
+
+    A column metrics.json doesn't govern at all — fk_normalized_score (a
+    locally-computed readability delta, not an LLM-judged dimension; see
+    _METRIC_EXPLANATIONS) or a one-off column someone added by hand outside
+    the GUI — is always offered, same as before, since there's no
+    metrics.json entry to be out of sync with.
+    """
+    score_columns = set(get_score_columns(df))
+    if not LLM_JUDGE_AVAILABLE:
+        return sorted(score_columns)
+
+    governed = {f"{slug}_score" for slug in load_all_metric_definitions()}
+    active = {f"{slug}_score" for slug in load_active_metric_definitions()}
+    return sorted((score_columns - governed) | (score_columns & active))
 
 
 def _select_active_items(all_items: list, kind: str, help_text: str) -> list:
@@ -960,7 +995,7 @@ def main() -> None:
         df = _reattach_custom_metrics(df, data_path, mtime)
         base_n_rows = len(df)  # true base row count, before any generated-prompt rows
         df = _reattach_custom_prompts(df, data_path, mtime, base_n_rows)
-        all_metrics = get_score_columns(df)
+        all_metrics = _get_available_metric_columns(df)
         all_prompts = sorted(df["prompt"].unique())
 
         # Built from whatever's currently available, for the "view" panels below —

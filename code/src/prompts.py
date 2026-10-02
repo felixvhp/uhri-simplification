@@ -46,24 +46,49 @@ _prompts_store = DefinitionsStore(PROMPTS_PATH, content_field="template")
 
 
 def load_all_prompt_definitions(path: Optional[Path] = None) -> dict:
-    """Load every prompt definition — standard AND custom, together.
+    """Load every prompt definition — standard AND custom, active AND retired.
 
     See DefinitionsStore.load_all() for the full contract; this is a thin
     wrapper so callers keep using `from src.prompts import
     load_all_prompt_definitions` rather than reaching into the store
-    directly.
+    directly. Use load_active_prompt_definitions() instead if you only want
+    the ones currently in use.
     """
     return _prompts_store.load_all(path)
 
 
-# The subset of prompts.json marked `standard: true` — flattened to
-# slug -> template, which is the shape build_prompt()/simplify() and every
-# existing caller/test expect. A custom (standard: false) prompt in the
-# same file only gets used when generate_new_prompt() is asked to.
+def load_active_prompt_definitions(path: Optional[Path] = None) -> dict:
+    """Load every ACTIVE prompt definition — standard and custom, together.
+
+    See DefinitionsStore.load_active() for the full contract. This is what
+    PROMPTS and the GUI's prompt list both filter on, mirroring
+    evaluation.py's load_active_metric_definitions()/EVAL_DIMENSIONS.
+    """
+    return _prompts_store.load_active(path)
+
+
+def set_prompt_active(slug: str, active: bool, path: Optional[Path] = None) -> None:
+    """Retire or restore one prompt definition in place (see DefinitionsStore.set_active()).
+
+    Use this instead of deleting an entry from prompts.json — its template
+    and date_added survive, and it can be reactivated later by calling this
+    again with active=True.
+    """
+    _prompts_store.set_active(slug, active, path)
+
+
+# The subset of prompts.json marked `standard: true` AND `active: true` —
+# flattened to slug -> template, which is the shape build_prompt()/
+# simplify() and every existing caller/test expect. A custom (standard:
+# false) prompt in the same file only gets used when generate_new_prompt()
+# is asked to. A standard prompt retired via set_prompt_active(slug, False)
+# stays in prompts.json but drops out of here and out of the GUI's prompt
+# list at the same time — see evaluation.py's EVAL_DIMENSIONS for the
+# identical pattern on the metrics side.
 PROMPTS = {
     slug: entry["template"]
     for slug, entry in load_all_prompt_definitions().items()
-    if entry.get("standard")
+    if entry.get("standard") and entry.get("active", True)
 }
 
 DEFAULT_PROMPT = PROMPTS["prompt_felix"]

@@ -16,16 +16,26 @@ Open Issues:
     - smaller models instead one big model
 
 Resumption:
-    All metric definitions — the 5 standard ones AND any custom ones added
-    via the GUI — live together in one file: metrics.json, next to this
-    module (git-tracked, so it's shared with anyone who pulls the repo). An
+    All metric definitions — standard ones AND any custom ones added via
+    the GUI — live together in one file: metrics.json, next to this module
+    (git-tracked, so it's shared with anyone who pulls the repo). An
     entry's `standard: true/false` flag is what tells the two apart, not
-    which file it's in. `date_added` is null for the 5 standard ones (they
-    predate the field, so there's no real date to record) and an ISO date
-    for every custom one. EVAL_DIMENSIONS is derived from the file at
-    import time (see load_all_metric_definitions()) and must stay in sync
-    with the JSON keys in EVAL_PROMPT — if you add a standard dimension,
-    add it to metrics.json with `standard: true` and update EVAL_PROMPT here.
+    which file it's in. `date_added` is null for entries that predate the
+    field and an ISO date for every one added since. EVAL_DIMENSIONS is
+    derived from the file at import time (see load_all_metric_definitions())
+    and must stay in sync with the JSON keys in EVAL_PROMPT — if you add a
+    standard dimension, add it to metrics.json with `standard: true` and
+    update EVAL_PROMPT here.
+
+    A dimension retired from the standard set (e.g. the original 5, retired
+    when the judge was rewritten to the current 9 fine-grained ones) is
+    never deleted from metrics.json — it's marked `"active": false`
+    instead, via DefinitionsStore.set_active(). EVAL_DIMENSIONS filters to
+    `standard AND active`, and the GUI's metric list (see
+    prompt_improvement_app.py's _get_available_metric_columns()) filters on
+    that exact same `active` flag read from this same file, so "what the
+    judge scores" and "what the GUI shows as available" can't silently
+    drift apart from each other the way they once did.
 
     evaluate_new_metric() (added 2026-09-13) lets a caller — the
     prompt-improvement Streamlit GUI, in particular — judge one ad-hoc
@@ -76,14 +86,35 @@ _metrics_store = DefinitionsStore(METRICS_PATH, content_field="description")
 
 
 def load_all_metric_definitions(path: Optional[Path] = None) -> dict:
-    """Load every metric definition — standard AND custom, together.
+    """Load every metric definition — standard AND custom, active AND retired.
 
     See DefinitionsStore.load_all() for the full contract; this is a thin
     wrapper so callers keep using `from src.evaluation import
     load_all_metric_definitions` rather than reaching into the store
-    directly.
+    directly. Use load_active_metric_definitions() instead if you only want
+    the ones currently in use.
     """
     return _metrics_store.load_all(path)
+
+
+def load_active_metric_definitions(path: Optional[Path] = None) -> dict:
+    """Load every ACTIVE metric definition — standard and custom, together.
+
+    See DefinitionsStore.load_active() for the full contract. This is what
+    EVAL_DIMENSIONS and the GUI's metric list both filter on, so neither
+    can show a retired metric the other has stopped scoring.
+    """
+    return _metrics_store.load_active(path)
+
+
+def set_metric_active(slug: str, active: bool, path: Optional[Path] = None) -> None:
+    """Retire or restore one metric definition in place (see DefinitionsStore.set_active()).
+
+    Use this instead of deleting an entry from metrics.json — its
+    description and date_added survive, and it can be reactivated later by
+    calling this again with active=True.
+    """
+    _metrics_store.set_active(slug, active, path)
 
 
 load_dotenv()  # loads ANTHROPIC_API_KEY from .env if present
@@ -114,20 +145,25 @@ Respond with ONLY a JSON object in exactly this format, with no preamble, no mar
 The "score" field must be a JSON boolean (true or false), never a string. The "reason" field is one short sentence explaining the score.\
 """
  
-# The subset of metrics.json marked `standard: true` — flattened to
-# slug -> description, which is the shape build_eval_prompt()/evaluate()
-# (below) and every existing caller/test expect. This is what gets judged
-# on *every* simplification by default; a custom (standard: false) metric
-# in the same file is judged only on demand, via evaluate_new_metric().
+# The subset of metrics.json marked `standard: true` AND `active: true` —
+# flattened to slug -> description, which is the shape
+# build_eval_prompt()/evaluate() (below) and every existing caller/test
+# expect. This is what gets judged on *every* simplification by default; a
+# custom (standard: false) metric in the same file is judged only on
+# demand, via evaluate_new_metric(). A standard metric retired via
+# set_metric_active(slug, False) stays in metrics.json (so its description/
+# history survives) but drops out of here and out of the GUI's metric list
+# at the same time, since both read the same `active` flag from the same
+# file.
 #
-# The 9 fine-grained dimensions below (replacing the original 5 -- see
-# metrics.json's git history for that version) live in metrics.json like
-# every other standard entry, rather than as a hardcoded dict, so they go
-# through the same load/save path as a custom metric.
+# The 9 fine-grained dimensions below replaced the original 5 (now
+# retired, active: false, still in metrics.json) — they live in
+# metrics.json like every other standard entry, rather than as a hardcoded
+# dict, so they go through the same load/save path as a custom metric.
 EVAL_DIMENSIONS = {
     slug: entry["description"]
     for slug, entry in load_all_metric_definitions().items()
-    if entry.get("standard")
+    if entry.get("standard") and entry.get("active", True)
 }
  
 def evaluate(
