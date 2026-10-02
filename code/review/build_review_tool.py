@@ -4,8 +4,12 @@ Build the Plain-English Translation Review tool.
 
 Injects two things into review_template.html:
   * REVIEW_DATA : the original + AI-draft pairs (from review_data.json)
-  * DIMENSIONS : generated VERBATIM from EVAL_DIMENSIONS in src/evaluation.py,
-                   so the human review axes can never drift from the judge's.
+  * DIMENSIONS : the `standard: true` entries of src/metrics.json — the same
+                   subset evaluation.py derives as EVAL_DIMENSIONS, so the
+                   human review axes can never drift from the judge's.
+                   Custom (standard: false) GUI metrics are excluded: they
+                   are judged on demand only, not part of the calibration
+                   contract.
 
 Usage:
     python review/build_review_tool.py
@@ -13,13 +17,12 @@ Writes review/translation_review.html (self-contained, opens in any browser).
 
 To repoint at a different dataset, regenerate review_data.json as a list of {id, original, variants:{<prompt>: <text>}} and rerun.
 """
-import ast
 import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent                       # code/
-EVAL_PY = ROOT / "src" / "evaluation.py"
+METRICS_JSON = ROOT / "src" / "metrics.json"
 TEMPLATE = HERE / "review_template.html"
 DATA = HERE / "review_data.json"
 OUT = HERE / "translation_review.html"
@@ -36,6 +39,7 @@ LABELS = {
     "plain_vocabulary": "Plain vocabulary",
     "standalone_comprehension": "Stands alone",
 }
+
 # Which dimensions are accessibility (judged on the draft alone) vs fidelity.
 ACCESSIBILITY = {"plain_vocabulary", "standalone_comprehension"}
 GROUP_FIDELITY = "Fidelity: checked against the original record"
@@ -43,14 +47,21 @@ GROUP_ACCESS = "Accessibility: judging the draft on its own"
 
 
 def load_eval_dimensions() -> dict:
-    """Parse EVAL_DIMENSIONS out of evaluation.py without importing it."""
-    tree = ast.parse(EVAL_PY.read_text())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            getattr(t, "id", None) == "EVAL_DIMENSIONS" for t in node.targets
-        ):
-            return ast.literal_eval(node.value)
-    raise SystemExit("EVAL_DIMENSIONS not found in evaluation.py")
+    """Load the standard metric definitions from metrics.json.
+
+    Same slug -> description mapping that evaluation.py derives as
+    EVAL_DIMENSIONS, read from the same file, without importing the module
+    (which would pull in anthropic/pandas just to build a static page).
+    """
+    entries = json.loads(METRICS_JSON.read_text())
+    dims = {
+        slug: entry["description"].strip()
+        for slug, entry in entries.items()
+        if entry.get("standard")
+    }
+    if not dims:
+        raise SystemExit(f"No standard metrics found in {METRICS_JSON}")
+    return dims
 
 
 def main() -> None:

@@ -24,10 +24,15 @@ def _score_df(*rows) -> pd.DataFrame:
 
 
 def _prompt_df(a_scores, b_scores) -> pd.DataFrame:
-    """Build a DataFrame with prompt and average_score columns."""
+    """Build a DataFrame with prompt and average_score columns.
+
+    Includes dummy original_text/transcribed_text columns: verbose
+    compare_prompts prints samples for high-variance prompts, which
+    needs them present.
+    """
     rows = (
-        [{"prompt": "A", "average_score": s} for s in a_scores]
-        + [{"prompt": "B", "average_score": s} for s in b_scores]
+        [{"prompt": "A", "average_score": s, "original_text": "orig", "transcribed_text": "simp"} for s in a_scores]
+        + [{"prompt": "B", "average_score": s, "original_text": "orig", "transcribed_text": "simp"} for s in b_scores]
     )
     return pd.DataFrame(rows)
 
