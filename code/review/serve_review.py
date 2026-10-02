@@ -1,36 +1,60 @@
 #!/usr/bin/env python3
-"""Thin HTTP server for the plain-English translation review tool.
+"""HTTP server for the plain-English translation review tool.
 
 Same transport-only pattern as web_demo.py on the retrieval-eval-prototype
-branch: this file owns no review logic and no markup. The page itself
-(translation_review.html) is fully self-contained — data and review axes are
-baked in by build_review_tool.py — so the server only hands out that file.
+branch: this file owns no review logic and no markup. It serves the page
+dynamically — review_template.html with empty data slots, which then fetches
+its data from the JSON API below — so dimension or dataset changes are live
+on the next browser refresh, with no build step. Everything is read from
+disk per request.
+
+  GET  /, /index.html, /review   the page (raw template, boots from the API)
+  GET  /api/axes                 review axes (standard metrics of
+                                 src/metrics.json + labels/groups, via
+                                 build_review_tool.build_axes)
+  GET  /api/records              review_data.json (regenerate with
+                                 make_review_data.py to swap datasets)
+  POST /api/reviews              store a submitted review export as
+                                 review/exports/review-<utc>-<rand>.json
+                                 (payload verbatim, same shape as the page's
+                                 manual JSON export; exports/ is gitignored)
+
+The standalone baked page (build_review_tool.py -> translation_review.html)
+still exists for no-server distribution (email / static host); it ignores
+the API and keeps the manual copy/download export only.
 
 Run:
     python review/serve_review.py                   # http://127.0.0.1:8010
     python review/serve_review.py --port 9000 --host 0.0.0.0
 
-Rebuild the page first if the data or dimensions changed:
-    python review/make_review_data.py && python review/build_review_tool.py
-
 Open Issues:
-    - Reviewer answers still live in the reviewer's browser and come back via
-      the page's export button; the server does not collect them. A POST
-      endpoint that receives exports would save the email round-trip.
+    - Submitted exports are trusted JSON from reviewers on the network the
+      server listens on; there is no auth. Fine on a private network or
+      behind a reverse proxy, not for the open internet as-is.
 
 Resumption:
-    When this merges with the retrieval demo, fold do_GET into web_demo.py's
-    Handler as a "/review" route and delete this file.
+    When this merges with the retrieval demo, fold the routes into
+    web_demo.py's Handler (the page route is already named /review) and
+    delete this file.
 """
 from __future__ import annotations
 
 import argparse
+import json
+import secrets
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from build_review_tool import build_axes
+
 HERE = Path(__file__).resolve().parent          # code/review
-PAGE = HERE / "translation_review.html"
+TEMPLATE = HERE / "review_template.html"
+RECORDS = HERE / "review_data.json"
+EXPORTS_DIR = HERE / "exports"
+
+MAX_SUBMIT_BYTES = 8 * 1024 * 1024   # generous: full-dataset review ~ a few MB
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -44,29 +68,73 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _json(self, code: int, obj: Any) -> None:
+        self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
+                   "application/json; charset=utf-8")
+
     def do_GET(self) -> None:
-        if self.path.split("?", 1)[0] not in ("/", "/index.html", "/review"):
+        path = self.path.split("?", 1)[0]
+
+        if path in ("/", "/index.html", "/review"):
+            if not TEMPLATE.is_file():
+                self._send(503, b"review_template.html missing", "text/plain; charset=utf-8")
+                return
+            self._send(200, TEMPLATE.read_bytes(), "text/html; charset=utf-8")
+            return
+
+        if path == "/api/axes":
+            self._json(200, build_axes())
+            return
+
+        if path == "/api/records":
+            if not RECORDS.is_file():
+                self._json(503, {"error": "review_data.json not generated yet - "
+                                          "run: python review/make_review_data.py"})
+                return
+            self._send(200, RECORDS.read_bytes(), "application/json; charset=utf-8")
+            return
+
+        self._send(404, b"not found", "text/plain; charset=utf-8")
+
+    def do_POST(self) -> None:
+        if self.path.split("?", 1)[0] != "/api/reviews":
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
-        if not PAGE.is_file():
-            self._send(
-                503,
-                b"translation_review.html not built yet - run: "
-                b"python review/build_review_tool.py",
-                "text/plain; charset=utf-8",
-            )
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = 0
+        if not 0 < length <= MAX_SUBMIT_BYTES:
+            self._json(413 if length else 400, {"error": "missing or oversized body"})
             return
-        self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except json.JSONDecodeError as exc:
+            self._json(400, {"error": f"invalid JSON: {exc}"})
+            return
+        if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+            self._json(400, {"error": "expected the page's JSON export ({records: [...]})"})
+            return
+
+        EXPORTS_DIR.mkdir(exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        name = f"review-{stamp}-{secrets.token_hex(3)}.json"
+        (EXPORTS_DIR / name).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"[reviews] stored {name} ({len(payload['records'])} records)", flush=True)
+        self._json(201, {"ok": True, "stored": name})
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Serve the translation review page.")
+    parser = argparse.ArgumentParser(description="Serve the translation review tool.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8010)
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Serving review tool on http://{args.host}:{args.port}", flush=True)
+    print(f"Serving review tool on http://{args.host}:{args.port}  "
+          f"(submissions -> {EXPORTS_DIR})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
