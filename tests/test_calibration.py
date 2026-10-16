@@ -109,3 +109,8 @@ def test_load_review_records_reads_files_and_dirs(tmp_path):
     sub.mkdir()
     (sub / "b.json").write_text(json.dumps({"records": [{"x": 2}, {"x": 3}]}))
     assert len(load_review_records([tmp_path / "a.json", sub])) == 3
+
+
+def test_load_review_records_tolerates_missing_default_dir(tmp_path):
+    # The default exports/ dir doesn't exist until the first submission.
+    assert load_review_records([tmp_path / "does_not_exist"]) == []

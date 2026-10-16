@@ -53,7 +53,12 @@ def load_review_records(paths: Iterable[Path]) -> list[dict]:
     files: list[Path] = []
     for p in paths:
         p = Path(p)
-        files.extend(sorted(p.glob("*.json")) if p.is_dir() else [p])
+        if p.is_dir():
+            files.extend(sorted(p.glob("*.json")))
+        elif p.is_file():
+            files.append(p)
+        # a missing path (e.g. the default exports/ before any submission
+        # has arrived) contributes nothing rather than crashing
     records = []
     for f in files:
         payload = json.loads(Path(f).read_text())
