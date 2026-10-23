@@ -290,10 +290,10 @@ function render(){
       '<label class="assign-n">Sample size <input id="sampleN" type="number" min="1" max="'+M+'" value="'+N+'"></label>'+
       '<span class="assign-note">'+(sampling
         ? 'Showing a random '+N+' of '+M+' records.'
-        : 'Showing all '+M+' records. Lower the sample size to review a random subset.')+
+        : 'Showing all '+M+' records.')+
         (API && state.done.length ? ' You have already submitted '+state.done.length : '')+
         (state.skipped.length ? (API && state.done.length ? ' and skipped ' : ' You have skipped ')+state.skipped.length : '')+
-        (API && state.done.length || state.skipped.length ? '; those are not counted here.' : '')+'</span>'+
+        (API && state.done.length || state.skipped.length ? '.' : '')+'</span>'+
     '</div>'+
     '<div class="pager panel">'+
       '<button class="nav" id="prev">← Prev</button>'+
@@ -317,9 +317,9 @@ function render(){
     '<div class="review panel">'+
       '<h2>Your review</h2>'+
       '<div class="dims" id="dims"></div>'+
-      '<div class="field"><div class="field-label">Overall: is this a usable first draft?</div><div class="verdicts" id="verdicts"></div></div>'+
       '<div class="field"><div class="field-label">Feedback on the criteria above <span class="soft">(optional)</span></div>'+
         '<textarea id="metric-notes" placeholder="Is any criterion unimportant or redundant? Is one missing that you would add? Was any hard to judge here?"></textarea></div>'+
+      '<div class="field"><div class="field-label">Overall: is this a usable first draft?</div><div class="verdicts" id="verdicts"></div></div>'+
       '<div class="field"><div class="field-label">Suggested correction <span class="soft">(optional: if you have time, rewrite the recommendation the way you would do it)</span></div>'+
         '<textarea class="correction" id="correction" placeholder="Edit the draft here…"></textarea></div>'+
       '<div class="field"><div class="field-label">Additional notes / feedback <span class="soft">(optional)</span></div>'+
