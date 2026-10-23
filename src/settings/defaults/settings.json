@@ -25,7 +25,7 @@
     "data_path": "data/cleaned.csv",
     "host": "127.0.0.1",
     "port": 8010,
-    "sample_size": 50,
+    "sample_size": 4,
     "max_sample_size": 500
   }
 }

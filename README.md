@@ -114,7 +114,7 @@ python -m src.feedback_form.build                   # or: one self-contained HTM
 ```
 
 The server hands each reviewer a random sample (`feedback_form.sample_size` in the
-settings, default 50, capped by `max_sample_size`); the same device gets the same
+settings, default 4, capped by `max_sample_size`); the same device gets the same
 records on every reload. The records file is indexed, not loaded, so it can hold the
 full UHRI export. The standalone page bakes in every record and samples in the
 browser, so keep that one to a few hundred records.

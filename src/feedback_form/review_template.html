@@ -300,7 +300,7 @@ function render(){
       '<button class="nav" id="next">Next →</button>'+
     '</div>'+
 
-    '<p class="lede">Read the original, then answer the same <strong>'+DIMENSIONS.length+'</strong> questions our automated evaluator scores: <strong>Yes</strong> if the draft passes, <strong>No</strong> if it fails. Give an overall verdict and, most usefully, fix the draft in place so we can see what a good version looks like.</p>'+
+    '<p class="lede">Read the original recommendation, then rate the draft on the <strong>'+DIMENSIONS.length+'</strong> criteria below: <strong>YES</strong> if it holds, <strong>NO</strong> if it does not. Give an overall verdict and, if you have time, rewrite the draft the way you would do it.</p>'+
 
     '<div class="compare">'+
       '<section class="panel orig"><div class="panel-head">Original text<span class="tag">UN source</span></div>'+
@@ -315,6 +315,8 @@ function render(){
       '<h2>Your review</h2>'+
       '<div class="dims" id="dims"></div>'+
       '<div class="field"><div class="field-label">Overall: is this a usable first draft?</div><div class="verdicts" id="verdicts"></div></div>'+
+      '<div class="field"><div class="field-label">Feedback on the criteria above <span class="soft">(optional)</span></div>'+
+        '<textarea id="metric-notes" placeholder="Was any criterion unclear, hard to judge, or missing for this record?"></textarea></div>'+
       '<div class="field"><div class="field-label">Suggested correction <span class="soft">(optional: if you have time, rewrite the recommendation the way you would do it)</span></div>'+
         '<textarea class="correction" id="correction" placeholder="Edit the draft here…"></textarea></div>'+
       '<div class="field"><div class="field-label">Additional notes / feedback <span class="soft">(optional)</span></div>'+
@@ -338,6 +340,9 @@ function render(){
   const notes=document.getElementById("notes");
   notes.value = a.notes||"";
   notes.oninput = ()=>{ a.notes=notes.value; persist(); };
+  const mn=document.getElementById("metric-notes");
+  mn.value = a.metricNotes||"";
+  mn.oninput = ()=>{ a.metricNotes=mn.value; persist(); };
 
   const go=d=>{ const n=current+d; if(n>=0 && n<workingSet.length){ current=n; render(); window.scrollTo(0,0); } };
   document.getElementById("prev").onclick=()=>go(-1);
@@ -409,7 +414,7 @@ function updateProgress(){
 }
 
 /* ---- Export ---- */
-function isTouched(a){ if(!a) return false; if(a.verdict) return true; if(a.dims&&Object.keys(a.dims).some(k=>a.dims[k])) return true; if(a.notes) return true; if(a.correction!=null) return true; return false; }
+function isTouched(a){ if(!a) return false; if(a.verdict) return true; if(a.dims&&Object.keys(a.dims).some(k=>a.dims[k])) return true; if(a.notes||a.metricNotes) return true; if(a.correction!=null) return true; return false; }
 function buildRecords(){
   const out=[];
   REVIEW_DATA.forEach((item,i)=>{
@@ -420,7 +425,7 @@ function buildRecords(){
     const corr=(a.correction!==null&&a.correction!==undefined)?a.correction:"";
     out.push(Object.assign({ record_index:item.id+1, reviewed_variant:a.variant||primaryOf(item), verdict:a.verdict||"" }, human, {
       correction_changed: corr!=="" && corr!==draftText(item),
-      suggested_correction:corr, notes:a.notes||"", original:item.original, ai_draft:draftText(item),
+      suggested_correction:corr, notes:a.notes||"", feedback_on_metrics:a.metricNotes||"", original:item.original, ai_draft:draftText(item),
     }));
   });
   return out;

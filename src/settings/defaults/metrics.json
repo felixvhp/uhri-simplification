@@ -1,6 +1,6 @@
 {
   "absolute_accessible": {
-    "active": true,
+    "active": false,
     "description": "Is the simplified text easy to read and understand for a lay-person and do all (sub-)parts of the text make sense on their own (paragraphs, sentences)?\n",
     "name": "Absolute accessible",
     "group": "accessibility"
