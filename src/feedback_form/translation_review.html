@@ -279,6 +279,7 @@ let DIMENSIONS  = [
 let FORM_CONFIG = {"primary": "summarise", "labels": {"accessible_transcribe": "Accessibility draft", "literal_transcribe": "Literal draft", "prompt_felix": "Preserve-detail draft", "simple_summary": "Plain-summary draft", "summarise": "Summary draft"}};
 let API = false;   // true when data came from the server (enables direct submit)
 let TOTAL = 0;     // records in the whole dataset (== REVIEW_DATA.length when baked)
+let REMAINING = 0; // records this device has not submitted yet (served mode)
 
 // The draft under review is the first of the settings' selected_prompts;
 // labels are the prompts' names. Both arrive via FORM_CONFIG (baked or /api/config).
@@ -309,7 +310,7 @@ function computeWorkingSet(){
   workingSet=idx.slice(0,N).sort((a,b)=>a-b);   // show in document order
 }
 
-function loadState(){ try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {reviewer:"",ann:{}}; } catch(e){ return {reviewer:"",ann:{}}; } }
+function loadState(){ try { const st=JSON.parse(localStorage.getItem(STORE_KEY)) || {reviewer:"",ann:{}}; if(!st.done) st.done=[]; return st; } catch(e){ return {reviewer:"",ann:{},done:[]}; } }
 function persist(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch(e){} flashSaved(); }
 function annOf(id, it){ if(!state.ann[id]) state.ann[id]={dims:{},verdict:null,correction:null,notes:"",variant:it?primaryOf(it):PRIMARY}; return state.ann[id]; }
 function primaryOf(it){ return it.variants[PRIMARY]!==undefined ? PRIMARY : Object.keys(it.variants)[0]; }   // fall back if a record lacks the primary draft
@@ -321,6 +322,12 @@ function flashSaved(){ const el=document.getElementById("saved"); if(!el) return
 function escapeHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
 function render(){
+  if(!workingSet.length){
+    document.getElementById("wrap").innerHTML =
+      '<div class="panel" style="padding:20px 24px"><strong>Nothing left to review.</strong>'+
+      '<p class="hint">You have submitted feedback on every record this review covers ('+TOTAL+' in total). Thank you.</p></div>';
+    return;
+  }
   const realIdx = workingSet[current];
   const item = REVIEW_DATA[realIdx];
   const a = annOf(item.id, item);
@@ -340,7 +347,8 @@ function render(){
       '<label class="assign-n">Sample size <input id="sampleN" type="number" min="1" max="'+M+'" value="'+N+'"></label>'+
       '<span class="assign-note">'+(sampling
         ? 'Showing a random '+N+' of '+M+' records.'
-        : 'Showing all '+M+' records. Lower the sample size to review a random subset.')+'</span>'+
+        : 'Showing all '+M+' records. Lower the sample size to review a random subset.')+
+        (API && state.done.length ? ' You have already submitted '+state.done.length+'; those are not shown again.' : '')+'</span>'+
     '</div>'+
     '<div class="pager panel">'+
       '<button class="nav" id="prev">← Prev</button>'+
@@ -399,7 +407,7 @@ function render(){
   document.getElementById("next2").disabled = current===workingSet.length-1;
   const sn=document.getElementById("sampleN");
   if(sn) sn.onchange=async()=>{
-    let v=parseInt(sn.value,10); const Mx=TOTAL; if(isNaN(v)||v<1) v=Mx; if(v>Mx) v=Mx;
+    let v=parseInt(sn.value,10); const Mx=API?REMAINING:TOTAL; if(isNaN(v)||v<1) v=Mx; if(v>Mx) v=Mx;
     state.sampleN=(v>=Mx)?null:v; persist();
     if(API){ try { await fetchRecords(); } catch(e){ setBtn("next","Reload failed"); return; } }
     computeWorkingSet(); current=0; render(); window.scrollTo(0,0);
@@ -512,14 +520,17 @@ function wireSubmit(){
       const r=await fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:buildJSON()});
       if(!r.ok) throw new Error("HTTP "+r.status);
       setBtn("submit-btn","Submitted ✓");
+      const sent=new Set(state.done);
+      REVIEW_DATA.forEach(it=>{ if(isTouched(state.ann[it.id])) sent.add(it.id); });
+      state.done=Array.from(sent);
       await newSet();   // answers are with the team now; start a fresh random set
     } catch(e){ setBtn("submit-btn","Failed — please try again"); }
     btn.disabled=false;
   };
 }
 
-// Served mode, after a submit: forget this device's answers and seed, draw a
-// new sample from the server and start over at record 1.
+// Served mode, after a submit: forget this device's answers and seed (but not
+// which ids were submitted), draw a new sample and start over at record 1.
 async function newSet(){
   state.ann={}; state.deviceSeed=null; persist();
   await fetchRecords();
@@ -560,9 +571,10 @@ function init(){
 async function fetchRecords(){
   const q=new URLSearchParams({seed:String(deviceSeed())});
   if(state.sampleN) q.set("n",String(state.sampleN));
+  if(state.done.length) q.set("exclude",state.done.join(","));   // never show a submitted record again
   const r=await fetch("/api/records?"+q.toString()); if(!r.ok) throw new Error(r.status);
   const d=await r.json();
-  REVIEW_DATA=d.records; TOTAL=d.total;
+  REVIEW_DATA=d.records; TOTAL=d.total; REMAINING=d.remaining;
   if(state.sampleN && state.sampleN!==d.sample_size && d.sample_size<d.total){ state.sampleN=d.sample_size; persist(); }   // server capped it
 }
 

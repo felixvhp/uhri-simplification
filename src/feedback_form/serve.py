@@ -15,15 +15,21 @@ disk per request.
   GET  /api/config               which prompt's draft is reviewed + prompt
                                  labels (settings selected_prompts / prompts.json,
                                  via build.build_form_config)
-  GET  /api/records?n=&seed=     a random sample of review_data.jsonl:
-                                 {"total", "sample_size", "seed", "records"}.
-                                 n defaults to settings feedback_form.sample_size
-                                 and is capped at max_sample_size; n=0 means all
-                                 (only if the file is within the cap). The same
-                                 (n, seed) returns the same records, so a
-                                 reviewer's set is stable across reloads. The
-                                 file is indexed, not loaded (records.py), so
-                                 it may hold the full UHRI export.
+  GET  /api/records?n=&seed=&exclude=
+                                 a random sample of review_data.jsonl:
+                                 {"total", "remaining", "sample_size", "seed",
+                                 "records"}. n defaults to settings
+                                 feedback_form.sample_size and is capped at
+                                 max_sample_size; n=0 means all (within the
+                                 cap). exclude is a comma-separated list of
+                                 record ids left out of the pool (the page
+                                 sends the ids it has already submitted, so a
+                                 device never gets a record twice); remaining
+                                 is the pool size after exclusion. The same
+                                 (n, seed, exclude) returns the same records,
+                                 so a reviewer's set is stable across reloads.
+                                 The file is indexed, not loaded (records.py),
+                                 so it may hold the full UHRI export.
   POST /api/reviews              store a submitted review export as
                                  src/feedback_form/exports/review-<utc>-<rand>.json
                                  (payload verbatim, same shape as the page's
@@ -66,7 +72,7 @@ import secrets
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Collection, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from ..settings import load_settings
@@ -90,7 +96,20 @@ def _int_param(query: dict, key: str) -> Optional[int]:
         return None
 
 
-def sample_records(store: RecordStore, n: Optional[int], seed: Optional[int]) -> dict:
+def _int_list_param(query: dict, key: str) -> set[int]:
+    """A comma-separated query parameter as a set of ints; junk is ignored."""
+    out: set[int] = set()
+    for raw in query.get(key, []):
+        for piece in raw.split(","):
+            try:
+                out.add(int(piece))
+            except ValueError:
+                pass
+    return out
+
+
+def sample_records(store: RecordStore, n: Optional[int], seed: Optional[int],
+                   exclude: Collection[int] = ()) -> dict:
     """The /api/records payload: a seeded random sample within the settings' bounds.
 
     Args:
@@ -99,22 +118,25 @@ def sample_records(store: RecordStore, n: Optional[int], seed: Optional[int]) ->
             which is capped at max_sample_size like any other request.
         seed: Reproducibility seed; None -> a fresh random one, echoed back
             so the page can keep it.
+        exclude: Record ids left out of the pool (already submitted ones).
 
     Returns:
-        {"total", "sample_size", "seed", "records"}.
+        {"total", "remaining", "sample_size", "seed", "records"}.
     """
     config = load_settings()["feedback_form"]
     total = store.count()
+    remaining = store.remaining(exclude)
     cap = max(1, int(config.get("max_sample_size", 500)))
     if n is None:
         n = int(config.get("sample_size", 50))
-    if n <= 0 or n > total:
-        n = total
+    if n <= 0 or n > remaining:
+        n = remaining
     n = min(n, cap)
     if seed is None:
         seed = secrets.randbelow(2**32)
-    records = store.sample(n, seed) if n < total else store.sample(0)
-    return {"total": total, "sample_size": len(records), "seed": seed, "records": records}
+    records = store.sample(n, seed, exclude) if n < remaining else store.sample(0, exclude=exclude)
+    return {"total": total, "remaining": remaining, "sample_size": len(records),
+            "seed": seed, "records": records}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -161,7 +183,8 @@ class Handler(BaseHTTPRequestHandler):
                                           "run: python -m src.feedback_form.make_data"})
                 return
             query = parse_qs(url.query)
-            self._json(200, sample_records(STORE, _int_param(query, "n"), _int_param(query, "seed")))
+            self._json(200, sample_records(STORE, _int_param(query, "n"), _int_param(query, "seed"),
+                                           _int_list_param(query, "exclude")))
             return
 
         self._send(404, b"not found", "text/plain; charset=utf-8")

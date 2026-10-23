@@ -92,3 +92,28 @@ def test_int_param():
     assert serve._int_param({"n": ["12"]}, "n") == 12
     assert serve._int_param({"n": ["x"]}, "n") is None
     assert serve._int_param({}, "n") is None
+
+
+def test_sample_excludes_submitted_ids(store):
+    done = set(range(0, 100, 2))   # every even id already submitted
+    out = store.sample(10, seed=3, exclude=done)
+    assert len(out) == 10 and all(r["id"] % 2 == 1 for r in out)
+    assert store.remaining(done) == 50
+    assert store.remaining() == 100
+
+
+def test_sample_with_everything_excluded_is_empty(store):
+    assert store.sample(10, seed=1, exclude=set(range(100))) == []
+    assert store.remaining(set(range(100))) == 0
+
+
+def test_sample_records_reports_remaining_and_shrinks_to_the_pool(store):
+    with patch("src.feedback_form.serve.load_settings", return_value=SETTINGS):
+        out = serve.sample_records(store, 20, 1, exclude=set(range(95)))
+    assert out["total"] == 100 and out["remaining"] == 5 and out["sample_size"] == 5
+    assert sorted(r["id"] for r in out["records"]) == [95, 96, 97, 98, 99]
+
+
+def test_int_list_param():
+    assert serve._int_list_param({"exclude": ["1,2,x,3"]}, "exclude") == {1, 2, 3}
+    assert serve._int_list_param({}, "exclude") == set()
