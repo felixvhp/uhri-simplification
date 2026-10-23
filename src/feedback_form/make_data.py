@@ -25,6 +25,7 @@ import argparse
 import csv
 import json
 import random
+import re
 from pathlib import Path
 
 from ..settings import load_settings
@@ -34,6 +35,19 @@ DEFAULT_CSV = Path(load_settings()["feedback_form"]["data_path"])
 OUT = HERE / "review_data.jsonl"
 
 REQUIRED_COLS = {"original_text", "prompt", "transcribed_text"}
+
+# Same cleanup as simplification.core.strip_markdown, copied rather than
+# imported (the tools never import each other): older results CSVs still
+# carry the model's **bold** headings.
+_MD_BOLD = re.compile(r"(\*\*|__)(.+?)\1", re.S)
+_MD_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+", re.M)
+
+
+def strip_markdown(text: str) -> str:
+    """Remove ``**``, ``__`` and leading ``#`` markers from a draft."""
+    text = _MD_BOLD.sub(r"\2", text)
+    text = _MD_HEADING.sub("", text)
+    return text.replace("**", "").strip()
 
 
 def main() -> None:
@@ -62,7 +76,7 @@ def main() -> None:
     for row in rows:
         orig = (row.get("original_text") or "").strip()
         prompt = (row.get("prompt") or "").strip()
-        draft = (row.get("transcribed_text") or "").strip()
+        draft = strip_markdown(row.get("transcribed_text") or "")
         if not orig or not prompt or not draft:
             continue
         grouped.setdefault(orig, {})[prompt] = draft

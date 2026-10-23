@@ -22,6 +22,7 @@ from src.simplification import (
     simplify_file,
     simplify_rows,
     simplify_text,
+    strip_markdown,
     write_rows,
 )
 from src.simplification.core import _MissingContext, build_context, output_columns, resolve_prompts
@@ -331,3 +332,15 @@ def test_simplify_path_dispatches_to_simplify_file(tmp_path, fake_llm):
     source = tmp_path / "recs.csv"
     write_rows(ROWS, source)
     assert simplify(source, prompts=ONE) == tmp_path / "recs.simplified.csv"
+
+
+def test_strip_markdown_removes_bold_and_headings_but_keeps_lists():
+    raw = "**Right to housing**\n\n## Summary\nThe Committee recommends that:\n- (a) build homes; __now__\n- (b) 2**3 is not markdown"
+    assert strip_markdown(raw) == (
+        "Right to housing\n\nSummary\nThe Committee recommends that:\n- (a) build homes; now\n- (b) 23 is not markdown"
+    )
+
+
+def test_simplify_text_strips_markdown_from_the_model_output():
+    with patch("src.simplification.core._call_openai", return_value="**Title**\n\nPlain text."):
+        assert simplify_text("x", "{text}") == "Title\n\nPlain text."

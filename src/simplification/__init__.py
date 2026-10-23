@@ -14,6 +14,7 @@ from .core import (
     simplify_file,
     simplify_rows,
     simplify_text,
+    strip_markdown,
 )
 from .io import SUPPORTED_FORMATS, read_rows, write_rows
 
@@ -25,5 +26,6 @@ __all__ = [
     "simplify_file",
     "simplify_rows",
     "simplify_text",
+    "strip_markdown",
     "write_rows",
 ]

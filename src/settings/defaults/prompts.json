@@ -22,6 +22,6 @@
   "summarise": {
     "active": true,
     "name": "Summary draft",
-    "template": "\nYou are a legal text simplifier. Rewrite the following legal text into plain, simple English that a general audience can understand. \nUse common words and short sentences. Keep all key facts and events. \nDo not add any information not in the original text.\n\nFor additional context, the text is type: {type}, written by {body}, and is concearning {country}.\n\nOriginal text:\n{text}\n\nSimplified version:\n"
+    "template": "\nYou are a legal text simplifier. Rewrite the following legal text into plain, simple English that a general audience can understand. \nUse common words and short sentences. Keep all key facts and events. \nDo not add any information not in the original text.\nWrite plain text only, with no Markdown formatting (no asterisks, headings or bullet symbols).\n\nFor additional context, the text is type: {type}, written by {body}, and is concearning {country}.\n\nOriginal text:\n{text}\n\nSimplified version:\n"
   }
 }

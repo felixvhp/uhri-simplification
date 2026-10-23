@@ -38,6 +38,7 @@ Resumption:
 import random
 import warnings
 from pathlib import Path
+import re
 from typing import Callable, Optional, Union
 
 import pandas as pd
@@ -88,6 +89,29 @@ def _get_openai_client() -> OpenAI:
     if openai_client is None:
         openai_client = OpenAI()
     return openai_client
+
+
+_MD_BOLD = re.compile(r"(\*\*|__)(.+?)\1", re.S)
+_MD_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+", re.M)
+
+
+def strip_markdown(text: str) -> str:
+    """Remove Markdown emphasis and heading markers the model may add.
+
+    Models tend to wrap headings in ``**...**`` even when asked for plain
+    text; the review page and the judge see those asterisks literally.
+    Only bold/italic markers and ``#`` headings are touched, so list dashes
+    and ordinary punctuation survive.
+
+    Args:
+        text: Model output.
+
+    Returns:
+        The same text without ``**``, ``__`` or leading ``#`` markers.
+    """
+    text = _MD_BOLD.sub(r"\2", text)
+    text = _MD_HEADING.sub("", text)
+    return text.replace("**", "").strip()
 
 
 def _call_openai(prompt: str, model: str, reasoning_effort: str) -> str:
@@ -152,7 +176,7 @@ def simplify_text(text: str, template: str, context: Optional[dict] = None, mode
     """
     config = load_settings()["simplification"]
     prompt = template.format_map(_MissingContext({**(context or {}), "text": text}))
-    return _call_openai(prompt, model or config["model"], config["reasoning_effort"])
+    return strip_markdown(_call_openai(prompt, model or config["model"], config["reasoning_effort"]))
 
 
 def resolve_prompts(prompts: Union[None, str, list, dict] = None) -> dict:
