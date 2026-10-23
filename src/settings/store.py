@@ -1,5 +1,5 @@
 """
-Pkg 3: Layered "defaults + user" JSON files [last updated 2026-10-02]
+Pkg 3: Layered "defaults + user" JSON files [last updated 2026-10-23]
 
 Usage:
     from src.settings import load_metrics, save_prompt, load_settings
@@ -14,8 +14,13 @@ touches the user file, so the defaults can never be changed by using the
 tools — edit them by hand (and commit) to change what everyone gets.
 
 Open Issues:
-    - A user entry replaces the default entry with the same slug wholesale;
-      there is no per-field merge inside one metric/prompt.
+    - A user file can change or add a field, but never remove one from the
+      defaults (make a definition inactive with "active": false instead).
+    - User files saved before 2026-10-23 hold full copies of the entries
+      they touched, which keep winning over later default edits. Delete
+      user/metrics.json and user/prompts.json once to reset them.
+    - Decide whether save_definition() should slugify its key itself
+      instead of trusting the caller.
 
 Resumption:
     A fourth shared file should be one more DefinitionsStore/SettingsStore
@@ -23,12 +28,35 @@ Resumption:
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
 SETTINGS_DIR = Path(__file__).resolve().parent
 DEFAULTS_DIR = SETTINGS_DIR / "defaults"
 USER_DIR = SETTINGS_DIR / "user"
+
+
+def slugify(name: str) -> str:
+    """Turn a free-text name into a lowercase, underscore-separated slug.
+
+    This is the key format of metrics.json and prompts.json, so any tool
+    that turns a typed name into a definition key uses this — e.g. a new
+    metric's column prefix, or a new prompt's ``prompt`` value.
+
+    Args:
+        name: Human-entered name, e.g. "Tone: formal enough?".
+
+    Returns:
+        Slug, e.g. "tone_formal_enough".
+
+    Raises:
+        ValueError: If ``name`` has no alphanumeric characters to slugify.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    if not slug:
+        raise ValueError(f"'{name}' has no usable characters for a slug")
+    return slug
 
 
 def _read_json(path: Path) -> dict:
@@ -48,7 +76,21 @@ def _write_json(path: Path, content: dict) -> None:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Return ``base`` updated with ``override``, merging nested dicts key by key."""
+    """Merge ``override`` into ``base`` and return the result as a new dict.
+
+    Keys only in one side are kept. Where both sides have a key, ``override``
+    is kept, except when both values are dicts: those are merged recursively.
+
+    ``base`` is not modified, but only its top level is copied: nested dicts
+    that ``override`` doesn't touch are shared with ``base``.
+
+    Args:
+        base: The starting values, e.g. the defaults.
+        override: Values that take precedence, e.g. the user's saved settings.
+
+    Returns:
+        A new dict with ``override`` merged over ``base``.
+    """
     merged = dict(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -61,6 +103,9 @@ def _deep_merge(base: dict, override: dict) -> dict:
 class _LayeredFile:
     """One file name that lives in both the defaults and the user folder.
 
+    Loading gives the defaults with the user file merged over them.
+    Saving writes into the user file only, never touching the defaults.
+
     Args:
         filename: e.g. "metrics.json".
         defaults_dir: Folder holding the tracked default file.
@@ -72,104 +117,76 @@ class _LayeredFile:
         self.default_path = Path(defaults_dir or DEFAULTS_DIR) / filename
         self.user_path = Path(user_dir or USER_DIR) / filename
 
-    def load_defaults(self) -> dict:
-        """Load the tracked default file only."""
-        return _read_json(self.default_path)
-
     def load_user(self) -> dict:
         """Load the user file only. Empty dict if nothing has been saved yet."""
         return _read_json(self.user_path)
 
+    def load(self) -> dict:
+        """Load the defaults with any saved user values merged over them."""
+        defaults = _read_json(self.default_path)
+        user = self.load_user()
+        return _deep_merge(defaults, user)
 
-class DefinitionsStore(_LayeredFile):
-    """Named definitions (metrics or prompts): slug -> {"name", <content>, "active"}.
+    def save(self, changes: dict) -> None:
+        """Merge ``changes`` into the user file only, never the defaults.
 
-    An entry is never deleted to retire it — it's marked ``"active": false``
-    (see set_active()), so its text survives and it can be brought back.
-
-    Args:
-        filename: e.g. "metrics.json".
-        content_field: The one field besides name/active — "description"
-            for a metric, "template" for a prompt.
-        defaults_dir: See _LayeredFile.
-        user_dir: See _LayeredFile.
-    """
-
-    def __init__(
-        self,
-        filename: str,
-        content_field: str,
-        defaults_dir: Optional[Path] = None,
-        user_dir: Optional[Path] = None,
-    ):
-        super().__init__(filename, defaults_dir, user_dir)
-        self.content_field = content_field
-
-    def load_all(self) -> dict:
-        """Load every definition: defaults, with user entries added or replacing them.
-
-        Returns:
-            Dict of slug -> entry, active AND retired. Filter on
-            ``entry.get("active", True)`` for the ones currently in use.
-        """
-        return {**self.load_defaults(), **self.load_user()}
-
-    def load_active(self) -> dict:
-        """Load the active definitions, flattened to slug -> content."""
-        return {
-            slug: entry[self.content_field]
-            for slug, entry in self.load_all().items()
-            if entry.get("active", True)
-        }
-
-    def save(self, slug: str, name: str, content: str) -> None:
-        """Save one definition to the user file, active by default.
-
-        Re-saving a slug overwrites just that entry; a slug that also exists
-        in the defaults is overridden for this user only.
+        Nested dicts merge key by key (see _deep_merge()); lists and other
+        values are replaced whole, so saving ``selected_prompts`` replaces
+        the list rather than adding to it.
 
         Args:
-            slug: The definition's key (see dashboard.text_utils.slugify).
-            name: Human-readable name.
-            content: The judge question (metric) or template (prompt).
+            changes: Only the keys to change, e.g.
+                ``{"selected_prompts": ["prompt_1"]}``.
         """
-        user = self.load_user()
-        user[slug] = {"name": name, self.content_field: content, "active": True}
-        _write_json(self.user_path, user)
+        merged_update = _deep_merge(self.load_user(), changes)
+        _write_json(self.user_path, merged_update)
+
+
+class DefinitionsStore(_LayeredFile):
+    """Named definitions (metrics or prompts): slug -> {"name", "description" | "template", "active", ...}.
+
+    An entry is never deleted to deactivate it — it's marked ``"active": false``
+    (see set_active()), so its text survives and it can be brought back.
+    """
+
+    def save_definition(self, slug: str, fields: dict) -> None:
+        """Save one definition to the user file, active by default.
+
+        Re-saving a slug merges into that entry: fields not passed keep
+        their current value. A slug that also exists in the defaults is
+        overridden for this user only, field by field.
+
+        Args:
+            slug: The definition's key (see slugify()).
+            fields: The fields to set on that entry and their values, e.g.
+                ``{"name": "Tone", "description": "Is it formal?"}``.
+        """
+        self.save({slug: {"active": True, **fields}})
 
     def set_active(self, slug: str, active: bool) -> None:
-        """Retire or restore one definition, for this user only.
+        """Deactivate or reactivate one definition, for this user only.
 
-        Copies the entry into the user file with the flag changed, so the
-        tracked defaults stay as they are.
+        Stores only ``{"active": ...}`` for this slug in the user file; the
+        rest of the entry keeps coming from the defaults, so later edits to
+        a default's wording still show up.
 
         Args:
             slug: The definition's key. Must exist in defaults or user file.
-            active: True to (re)activate, False to retire.
+            active: True to (re)activate, False to deactivate.
 
         Raises:
             KeyError: If ``slug`` isn't defined anywhere.
         """
-        definitions = self.load_all()
+        definitions = self.load()
         if slug not in definitions:
             raise KeyError(f"No such definition: '{slug}'")
-        user = self.load_user()
-        user[slug] = {**definitions[slug], "active": active}
-        _write_json(self.user_path, user)
+        self.save({slug: {"active": active}})
 
 
 class SettingsStore(_LayeredFile):
-    """A plain settings object: user values override defaults, key by key."""
+    """A plain settings object: user values override defaults, key by key.
 
-    def load(self) -> dict:
-        """Load the defaults with any saved user values merged over them."""
-        return _deep_merge(self.load_defaults(), self.load_user())
-
-    def save(self, changes: dict) -> None:
-        """Merge ``changes`` into the user file (nested dicts merge key by key).
-
-        Args:
-            changes: Only the keys to change, e.g.
-                ``{"selected_prompts": ["prompt_felix"]}``.
-        """
-        _write_json(self.user_path, _deep_merge(self.load_user(), changes))
+    Sections (``simplification``, ``dashboard``, ``feedback_form``) merge
+    key by key, so saving one dashboard value keeps the rest; lists such as
+    ``selected_prompts`` are replaced whole.
+    """

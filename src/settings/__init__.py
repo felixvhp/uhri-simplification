@@ -4,9 +4,9 @@ Pkg 3: Shared settings — the only layer the three tools have in common
 
 Usage:
     from src.settings import (
-        load_metrics, active_metrics, save_metric, set_metric_active,
+        load_metrics, save_metric, set_metric_active,
         load_prompts, selected_prompts, save_prompt, set_prompt_active,
-        load_settings, save_settings,
+        load_settings, save_settings, slugify,
     )
 
 simplification/, dashboard/ and feedback_form/ never import each other.
@@ -26,10 +26,10 @@ Resumption:
     load_settings(). Don't add a direct import between the tools instead.
 """
 
-from .store import DEFAULTS_DIR, USER_DIR, DefinitionsStore, SettingsStore
+from .store import DEFAULTS_DIR, USER_DIR, DefinitionsStore, SettingsStore, slugify
 
-_metrics = DefinitionsStore("metrics.json", content_field="description")
-_prompts = DefinitionsStore("prompts.json", content_field="template")
+_metrics = DefinitionsStore("metrics.json")
+_prompts = DefinitionsStore("prompts.json")
 _settings = SettingsStore("settings.json")
 
 
@@ -37,22 +37,17 @@ _settings = SettingsStore("settings.json")
 
 
 def load_metrics() -> dict:
-    """Every metric definition (active and retired): slug -> {"name", "description", "active", ...}."""
-    return _metrics.load_all()
-
-
-def active_metrics() -> dict:
-    """The currently-active metrics, flattened to slug -> judge question."""
-    return _metrics.load_active()
+    """Every metric definition (active and inactive): slug -> {"name", "description", "active", ...}."""
+    return _metrics.load()
 
 
 def save_metric(slug: str, name: str, description: str) -> None:
     """Save one metric (name + judge question) to the user metrics file."""
-    _metrics.save(slug, name, description)
+    _metrics.save_definition(slug, {"name": name, "description": description})
 
 
 def set_metric_active(slug: str, active: bool) -> None:
-    """Retire or restore one metric for this user (see DefinitionsStore.set_active())."""
+    """Deactivate or reactivate one metric for this user (see DefinitionsStore.set_active())."""
     _metrics.set_active(slug, active)
 
 
@@ -60,17 +55,17 @@ def set_metric_active(slug: str, active: bool) -> None:
 
 
 def load_prompts() -> dict:
-    """Every prompt definition (active and retired): slug -> {"name", "template", "active"}."""
-    return _prompts.load_all()
+    """Every prompt definition (active and inactive): slug -> {"name", "template", "active"}."""
+    return _prompts.load()
 
 
 def save_prompt(slug: str, name: str, template: str) -> None:
     """Save one prompt (name + template) to the user prompts file."""
-    _prompts.save(slug, name, template)
+    _prompts.save_definition(slug, {"name": name, "template": template})
 
 
 def set_prompt_active(slug: str, active: bool) -> None:
-    """Retire or restore one prompt for this user (see DefinitionsStore.set_active())."""
+    """Deactivate or reactivate one prompt for this user (see DefinitionsStore.set_active())."""
     _prompts.set_active(slug, active)
 
 

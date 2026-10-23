@@ -12,7 +12,23 @@ import json
 import pytest
 
 import src.settings as settings
-from src.settings.store import DefinitionsStore, SettingsStore
+from src.settings.store import DefinitionsStore, SettingsStore, slugify
+
+
+# ── slugify ───────────────────────────────────────────────────────────────────
+
+
+def test_slugify_lowercases_and_joins_with_underscores():
+    assert slugify("Tone: formal enough?") == "tone_formal_enough"
+
+
+def test_slugify_collapses_repeated_separators():
+    assert slugify("  extra   spaces -- here  ") == "extra_spaces_here"
+
+
+def test_slugify_rejects_names_with_no_usable_characters():
+    with pytest.raises(ValueError):
+        slugify("???")
 
 
 def _dirs(tmp_path, filename, defaults):
@@ -25,77 +41,89 @@ def _dirs(tmp_path, filename, defaults):
 
 def _definitions(tmp_path, defaults=None):
     defaults_dir, user_dir = _dirs(tmp_path, "defs.json", defaults or {})
-    return DefinitionsStore("defs.json", "description", defaults_dir, user_dir)
+    return DefinitionsStore("defs.json", defaults_dir, user_dir)
+
+
+def _defaults(store):
+    """Read a store's tracked default file straight from disk, bypassing the merge."""
+    return json.loads(store.default_path.read_text())
 
 
 DEFAULT_DEFS = {
     "kept": {"name": "Kept", "description": "default question", "active": True},
-    "retired": {"name": "Retired", "description": "old question", "active": False},
+    "inactive": {"name": "Inactive", "description": "old question", "active": False},
 }
 
 
 # ── DefinitionsStore ──────────────────────────────────────────────────────────
 
 
-def test_load_all_is_defaults_when_nothing_saved(tmp_path):
+def test_load_is_defaults_when_nothing_saved(tmp_path):
     store = _definitions(tmp_path, DEFAULT_DEFS)
-    assert store.load_all() == DEFAULT_DEFS
+    assert store.load() == DEFAULT_DEFS
     assert store.load_user() == {}
 
 
-def test_load_all_empty_when_no_files_exist(tmp_path):
-    store = DefinitionsStore("missing.json", "description", tmp_path / "d", tmp_path / "u")
-    assert store.load_all() == {}
+def test_load_empty_when_no_files_exist(tmp_path):
+    store = DefinitionsStore("missing.json", tmp_path / "d", tmp_path / "u")
+    assert store.load() == {}
 
 
 def test_save_writes_user_file_and_leaves_defaults_untouched(tmp_path):
     store = _definitions(tmp_path, DEFAULT_DEFS)
-    store.save("tone", "Tone", "Is it formal?")
+    store.save_definition("tone", {"name": "Tone", "description": "Is it formal?"})
 
     assert store.load_user() == {"tone": {"name": "Tone", "description": "Is it formal?", "active": True}}
-    assert store.load_defaults() == DEFAULT_DEFS
-    assert set(store.load_all()) == {"kept", "retired", "tone"}
+    assert _defaults(store) == DEFAULT_DEFS
+    assert set(store.load()) == {"kept", "inactive", "tone"}
 
 
 def test_save_creates_the_user_folder(tmp_path):
     store = _definitions(tmp_path, DEFAULT_DEFS)
     assert not store.user_path.parent.exists()
-    store.save("tone", "Tone", "Is it formal?")
+    store.save_definition("tone", {"name": "Tone", "description": "Is it formal?"})
     assert store.user_path.is_file()
 
 
 def test_user_entry_overrides_default_with_same_slug(tmp_path):
     store = _definitions(tmp_path, DEFAULT_DEFS)
-    store.save("kept", "Kept", "my own question")
-    assert store.load_all()["kept"]["description"] == "my own question"
-    assert store.load_defaults()["kept"]["description"] == "default question"
+    store.save_definition("kept", {"description": "my own question"})
+    assert store.load()["kept"]["description"] == "my own question"
+    assert store.load()["kept"]["name"] == "Kept"  # fields not saved still come from the default
+    assert _defaults(store)["kept"]["description"] == "default question"
 
 
 def test_save_keeps_other_user_entries(tmp_path):
     store = _definitions(tmp_path)
-    store.save("a", "A", "first")
-    store.save("b", "B", "second")
+    store.save_definition("a", {"name": "A", "description": "first"})
+    store.save_definition("b", {"name": "B", "description": "second"})
     assert set(store.load_user()) == {"a", "b"}
 
 
-def test_load_active_excludes_retired_and_flattens(tmp_path):
-    store = _definitions(tmp_path, DEFAULT_DEFS)
-    assert store.load_active() == {"kept": "default question"}
-
-
-def test_set_active_retires_a_default_for_this_user_only(tmp_path):
+def test_set_active_deactivates_a_default_for_this_user_only(tmp_path):
     store = _definitions(tmp_path, DEFAULT_DEFS)
     store.set_active("kept", False)
 
-    assert store.load_all()["kept"]["active"] is False
-    assert store.load_all()["kept"]["description"] == "default question"  # text survives
-    assert store.load_defaults()["kept"]["active"] is True
+    assert store.load()["kept"]["active"] is False
+    assert store.load()["kept"]["description"] == "default question"  # text survives
+    assert _defaults(store)["kept"]["active"] is True
+
+
+def test_inactive_default_still_picks_up_new_default_wording(tmp_path):
+    store = _definitions(tmp_path, DEFAULT_DEFS)
+    store.set_active("kept", False)
+    reworded = {**DEFAULT_DEFS, "kept": {**DEFAULT_DEFS["kept"], "description": "new wording"}}
+    store.default_path.write_text(json.dumps(reworded))
+
+    assert store.load()["kept"]["description"] == "new wording"
+    assert store.load()["kept"]["active"] is False
+    assert store.load_user() == {"kept": {"active": False}}  # only the flag is stored
 
 
 def test_set_active_can_reactivate(tmp_path):
     store = _definitions(tmp_path, DEFAULT_DEFS)
-    store.set_active("retired", True)
-    assert "retired" in store.load_active()
+    store.set_active("inactive", True)
+    assert store.load()["inactive"]["active"] is True
 
 
 def test_set_active_raises_for_unknown_slug(tmp_path):
@@ -135,7 +163,7 @@ def test_saving_settings_never_writes_the_defaults(tmp_path):
     store = _settings(tmp_path)
     store.save({"selected_prompts": ["b", "c"]})
 
-    assert store.load_defaults() == DEFAULT_SETTINGS
+    assert _defaults(store) == DEFAULT_SETTINGS
     assert store.load_user() == {"selected_prompts": ["b", "c"]}
     assert store.load()["selected_prompts"] == ["b", "c"]  # lists are replaced, not merged
 
@@ -162,7 +190,7 @@ def test_default_files_are_consistent(isolated_user_dir):
     assert settings.selected_prompts()  # at least one, and all resolvable
     assert all("template" in entry for entry in settings.load_prompts().values())
     assert all("description" in entry for entry in settings.load_metrics().values())
-    assert settings.active_metrics()
+    assert any(entry.get("active", True) for entry in settings.load_metrics().values())
 
 
 def test_default_prompts_all_have_a_text_slot(isolated_user_dir):
@@ -185,8 +213,9 @@ def test_selected_prompts_raises_for_undefined_slug(isolated_user_dir):
         settings.selected_prompts()
 
 
-def test_save_metric_reaches_active_metrics(isolated_user_dir):
+def test_save_metric_then_deactivate_it(isolated_user_dir):
     settings.save_metric("tone", "Tone", "Is it formal?")
-    assert settings.active_metrics()["tone"] == "Is it formal?"
+    assert settings.load_metrics()["tone"]["description"] == "Is it formal?"
+    assert settings.load_metrics()["tone"]["active"] is True
     settings.set_metric_active("tone", False)
-    assert "tone" not in settings.active_metrics()
+    assert settings.load_metrics()["tone"]["active"] is False

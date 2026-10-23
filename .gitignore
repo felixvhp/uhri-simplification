@@ -6,6 +6,7 @@ data/*
 
 
 .DS_store
+CLAUDE.md
 
 # Secrets — never commit these
 .env
@@ -35,3 +36,6 @@ src/settings/user/*
 # Packaging
 build/
 *.egg-info/
+
+# personal code-review tours (VS Code CodeTour + vim quickfix)
+.tours/
