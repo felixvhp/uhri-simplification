@@ -241,15 +241,17 @@ function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.im
 function sampleSize(){ if(API) return REVIEW_DATA.length; const M=TOTAL, n=state.sampleN; return (!n||n<1||n>=M)?M:n; }
 function deviceSeed(){ if(!state.deviceSeed){ state.deviceSeed=(Math.floor(Math.random()*4294967296))>>>0; persist(); } return state.deviceSeed; }
 function computeWorkingSet(){
-  const M=TOTAL, N=sampleSize();
-  if(API || N>=M){ workingSet=REVIEW_DATA.map((_,i)=>i); return; }   // served: already sampled
+  const M=TOTAL, N=sampleSize(), skipped=new Set(state.skipped);
+  const keep=i=>!skipped.has(REVIEW_DATA[i].id);
+  if(API || N>=M){ workingSet=REVIEW_DATA.map((_,i)=>i).filter(keep).sort((a,b)=>REVIEW_DATA[a].id-REVIEW_DATA[b].id); return; }   // served: already sampled
   const idx=REVIEW_DATA.map((_,i)=>i);
   const rng=mulberry32(deviceSeed());   // anonymous per-device seed; no name collected
   for(let i=idx.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); const tmp=idx[i]; idx[i]=idx[j]; idx[j]=tmp; }
-  workingSet=idx.slice(0,N).sort((a,b)=>a-b);   // show in document order
+  workingSet=idx.slice(0,N).filter(keep).sort((a,b)=>a-b);   // show in document order
 }
 
-function loadState(){ try { const st=JSON.parse(localStorage.getItem(STORE_KEY)) || {reviewer:"",ann:{}}; if(!st.done) st.done=[]; return st; } catch(e){ return {reviewer:"",ann:{},done:[]}; } }
+function loadState(){ try { const st=JSON.parse(localStorage.getItem(STORE_KEY)) || {reviewer:"",ann:{}}; if(!st.done) st.done=[]; if(!st.skipped) st.skipped=[]; return st; } catch(e){ return {reviewer:"",ann:{},done:[],skipped:[]}; } }
+function excludedIds(){ return state.done.concat(state.skipped); }   // never shown to this device again
 function persist(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch(e){} flashSaved(); }
 function annOf(id, it){ if(!state.ann[id]) state.ann[id]={dims:{},verdict:null,correction:null,notes:"",variant:it?primaryOf(it):PRIMARY}; return state.ann[id]; }
 function primaryOf(it){ return it.variants[PRIMARY]!==undefined ? PRIMARY : Object.keys(it.variants)[0]; }   // fall back if a record lacks the primary draft
@@ -287,7 +289,8 @@ function render(){
       '<span class="assign-note">'+(sampling
         ? 'Showing a random '+N+' of '+M+' records.'
         : 'Showing all '+M+' records. Lower the sample size to review a random subset.')+
-        (API && state.done.length ? ' You have already submitted '+state.done.length+'; those are not shown again.' : '')+'</span>'+
+        (API && state.done.length ? ' You have already submitted '+state.done.length+'; those are not shown again.' : '')+
+        (state.skipped.length ? ' Skipped: '+state.skipped.length+'.' : '')+'</span>'+
     '</div>'+
     '<div class="pager panel">'+
       '<button class="nav" id="prev">← Prev</button>'+
@@ -319,6 +322,7 @@ function render(){
       '<div class="footnav">'+
         '<button class="nav" id="prev2">← Previous</button>'+
         '<button class="nav" id="next2">Next →</button>'+
+        '<button class="nav" id="skip" title="Drop this record from your set and get another one">Skip this record</button>'+
         '<span class="saved" id="saved">Saved</span>'+
       '</div>'+
     '</div>';
@@ -344,6 +348,7 @@ function render(){
   document.getElementById("prev2").disabled = current===0;
   document.getElementById("next").disabled = current===workingSet.length-1;
   document.getElementById("next2").disabled = current===workingSet.length-1;
+  document.getElementById("skip").onclick=skipCurrent;
   const sn=document.getElementById("sampleN");
   if(sn) sn.onchange=async()=>{
     let v=parseInt(sn.value,10); const Mx=API?REMAINING:TOTAL; if(isNaN(v)||v<1) v=Mx; if(v>Mx) v=Mx;
@@ -426,6 +431,7 @@ function buildJSON(){
     sample_size: N>=M ? "all" : N,
     total_records: M,
     assigned_records: workingSet.map(i=>REVIEW_DATA[i].id+1),
+    skipped_records: state.skipped.map(id=>id+1),
     records: buildRecords(),
   }, null, 2);
 }
@@ -466,6 +472,24 @@ function wireSubmit(){
     } catch(e){ setBtn("submit-btn","Failed — please try again"); }
     btn.disabled=false;
   };
+}
+
+// Skip: drop the current record from this device's set for good (its draft
+// answers are discarded) and, when served, pull one unseen record in its place.
+async function skipCurrent(){
+  const item=REVIEW_DATA[workingSet[current]]; if(!item) return;
+  delete state.ann[item.id]; state.skipped.push(item.id); persist();
+  if(API){
+    try {
+      const q=new URLSearchParams({n:"1", seed:String((Math.random()*4294967296)>>>0),
+                                   exclude:excludedIds().concat(REVIEW_DATA.map(it=>it.id)).join(",")});
+      const r=await fetch("/api/records?"+q.toString());
+      if(r.ok){ const d=await r.json(); REMAINING=d.remaining; d.records.forEach(it=>REVIEW_DATA.push(it)); }
+    } catch(e){}
+  }
+  computeWorkingSet();
+  if(current>=workingSet.length) current=Math.max(0,workingSet.length-1);
+  render(); window.scrollTo(0,0);
 }
 
 // Served mode, after a submit: forget this device's answers and seed (but not
@@ -510,7 +534,7 @@ function init(){
 async function fetchRecords(){
   const q=new URLSearchParams({seed:String(deviceSeed())});
   if(state.sampleN) q.set("n",String(state.sampleN));
-  if(state.done.length) q.set("exclude",state.done.join(","));   // never show a submitted record again
+  const ex=excludedIds(); if(ex.length) q.set("exclude",ex.join(","));   // never show a submitted or skipped record again
   const r=await fetch("/api/records?"+q.toString()); if(!r.ok) throw new Error(r.status);
   const d=await r.json();
   REVIEW_DATA=d.records; TOTAL=d.total; REMAINING=d.remaining;
