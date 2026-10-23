@@ -442,7 +442,7 @@ function wireSubmit(){
   document.getElementById("export-btn").textContent="Submit feedback";
   document.getElementById("modal-title").textContent="Submit feedback";
   document.getElementById("export-note").textContent=
-    "Sends every review recorded on this device to the team. You can submit again later; the latest submission counts. "+
+    "Sends every review recorded on this device to the team, then gives you a fresh set of records. "+
     "No names or personal data are collected.";
   document.getElementById("export-text").hidden=true;
   document.getElementById("copy-btn").hidden=true;
@@ -453,9 +453,19 @@ function wireSubmit(){
       const r=await fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:buildJSON()});
       if(!r.ok) throw new Error("HTTP "+r.status);
       setBtn("submit-btn","Submitted ✓");
+      await newSet();   // answers are with the team now; start a fresh random set
     } catch(e){ setBtn("submit-btn","Failed — please try again"); }
     btn.disabled=false;
   };
+}
+
+// Served mode, after a submit: forget this device's answers and seed, draw a
+// new sample from the server and start over at record 1.
+async function newSet(){
+  state.ann={}; state.deviceSeed=null; persist();
+  await fetchRecords();
+  computeWorkingSet(); current=0;
+  closeExport(); render(); window.scrollTo(0,0);
 }
 
 function init(){
