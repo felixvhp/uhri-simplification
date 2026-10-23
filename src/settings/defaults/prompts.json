@@ -1,27 +1,27 @@
 {
   "accessible_transcribe": {
     "active": true,
-    "name": "accessible_transcribe",
+    "name": "Accessibility draft",
     "template": "\nYou are a accessibility converter. Your task is to make the following legal text \naccessible to someone with limited English. Preserve the original meaning exactly. \nUse very simple words and short sentences. Keep all the detail. \nDo not add any information not in the original text.\n\nFor additional context, the text is type: {type}, written by {body}, and is concearning {country}.\n\nOriginal text:\n{text}\n\nSimplified version:\n"
   },
   "literal_transcribe": {
     "active": true,
-    "name": "literal_transcribe",
+    "name": "Literal draft",
     "template": "\nYou are a text transcriber. Rewrite the following legal text by only simplifying the vocabulary - keep the original sentence structure and meaning as close as possible.\nReplace complex words with simpler synonyms but maintain the formal tone. \nDo not summarize, explain, or add anything. Keep it literal.\n\nFor additional context, the text is type: {type}, written by {body}, and is concearning {country}.\n\nOriginal text:\n{text}\n\nSimplified version:\n"
   },
   "prompt_felix": {
     "active": true,
-    "name": "prompt_felix",
+    "name": "Preserve-detail draft",
     "template": "You are simplifying a {type} from {body} concerning {country} for a non-expert reader.\n\nGOALS\n- Make the text easier to read using everyday vocabulary and shorter sentences.\n- Preserve every named actor, body, obligation, modal verb, and specific reference exactly.\n\nGUIDELINES\n\n1. Word choice: replace formal/legal vocabulary with everyday equivalents.\n   \"is mandated to\" -> \"is responsible for\"\n   \"conduct criminal investigations\" -> \"carry out criminal investigations\"\n   \"characterised by undue delays\" -> \"marked by delays that are too long\"\n\n2. Technical UN/human-rights terms: keep the term, add a brief definition in parentheses on first use.\n   \"reasonable accommodation\" -> \"reasonable accommodation (necessary adjustments so persons with disabilities can exercise their rights equally)\"\n   \"non-refoulement\" -> \"non-refoulement (the prohibition on returning people to countries where they face serious harm)\"\n\n3. Legal and country-specific references: keep the proper name, add a brief explanation in parentheses on first use.\n   \"Istanbul Convention\" -> \"Istanbul Convention (2011 Council of Europe treaty requiring states to prevent violence against women)\"\n   \"Commonwealth Rent Assistance\" -> \"Commonwealth Rent Assistance (Australian federal payment to low-income renters)\"\n\n4. Sentences: split overly long sentences, but do not fragment into choppy short ones. \"John wrote a book. I read that book.\" is too far.\n\nSTRICT PRESERVATION RULES\n- Every named body or actor stays named. Do NOT generalize \"the Criminal Investigation Department and the Attorney General's Department\" to \"the relevant authorities\".\n- Modal verbs keep their force: \"must\" stays \"must\", not \"should\". \"shall\" stays \"shall\".\n- All conditions, exceptions, and qualifications survive.\n- No new information, interpretations, or context that is not in the original.\n\nOutput ONLY the rewritten text. No preamble.\n\nOriginal text:\n{text}\n\nSimplified version:\n"
   },
   "simple_summary": {
     "active": true,
-    "name": "simple_summary",
+    "name": "Plain-summary draft",
     "template": "Please summarise the following {type} from {body} into plain simple English.\nBe sure to use only information from the text.\nThe text is about {country}\n\nOriginal text:\n{text}\n\nSimplified version:\n"
   },
   "summarise": {
     "active": true,
-    "name": "summarise",
+    "name": "Summary draft",
     "template": "\nYou are a legal text simplifier. Rewrite the following legal text into plain, simple English that a general audience can understand. \nUse common words and short sentences. Keep all key facts and events. \nDo not add any information not in the original text.\n\nFor additional context, the text is type: {type}, written by {body}, and is concearning {country}.\n\nOriginal text:\n{text}\n\nSimplified version:\n"
   }
 }

@@ -12,6 +12,9 @@ disk per request.
   GET  /healthz                  liveness check for hosting platforms
   GET  /api/axes                 review axes (active metrics of the shared
                                  settings + labels/groups, via build.build_axes)
+  GET  /api/config               which prompt's draft is reviewed + prompt
+                                 labels (settings selected_prompts / prompts.json,
+                                 via build.build_form_config)
   GET  /api/records?n=&seed=     a random sample of review_data.jsonl:
                                  {"total", "sample_size", "seed", "records"}.
                                  n defaults to settings feedback_form.sample_size
@@ -67,7 +70,7 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from ..settings import load_settings
-from .build import build_axes
+from .build import build_axes, build_form_config
 from .records import RecordStore
 
 HERE = Path(__file__).resolve().parent
@@ -146,6 +149,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/axes":
             self._json(200, build_axes())
+            return
+
+        if path == "/api/config":
+            self._json(200, build_form_config())
             return
 
         if path == "/api/records":

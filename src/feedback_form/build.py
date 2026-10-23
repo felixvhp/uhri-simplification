@@ -3,7 +3,10 @@
 Pkg 3: Build the Plain-English Translation Review tool (feedback form)
 [last updated 2026-10-23]
 
-Injects two things into review_template.html:
+Injects three things into review_template.html:
+  * FORM_CONFIG : which prompt's draft is reviewed (the first of the settings'
+                   selected_prompts) and the reviewer-facing name of every
+                   prompt (prompts.json "name"), via build_form_config()
   * REVIEW_DATA : the original + AI-draft pairs (all of review_data.jsonl;
                    the baked page samples client-side, so keep it to a few
                    hundred records — the served page scales, this one does not)
@@ -27,7 +30,7 @@ Resumption:
 import json
 from pathlib import Path
 
-from ..settings import load_metrics
+from ..settings import load_metrics, load_prompts, load_settings
 from .records import RecordStore
 
 HERE = Path(__file__).resolve().parent
@@ -67,15 +70,35 @@ def build_axes() -> list[dict]:
     return axes
 
 
+def build_form_config() -> dict:
+    """Which draft the reviewer judges, and how the prompts are labelled.
+
+    Shared by main() (baked) and serve.py's /api/config (live), so the form
+    follows the shared settings instead of hard-coding a prompt name.
+
+    Returns:
+        {"primary": <slug of the first selected prompt, or "" if none>,
+         "labels": {<slug>: <name>} for every prompt defined}.
+    """
+    selected = load_settings().get("selected_prompts", [])
+    return {
+        "primary": selected[0] if selected else "",
+        "labels": {slug: entry.get("name", slug) for slug, entry in load_prompts().items()},
+    }
+
+
 def main() -> None:
     axes = build_axes()
+    config = build_form_config()
     data = RecordStore(DATA).all()
     html = TEMPLATE.read_text()
     html = html.replace("/*__DIMENSIONS__*/[]", json.dumps(axes, ensure_ascii=False, indent=2), 1)
     html = html.replace("/*__REVIEW_DATA__*/[]", json.dumps(data, ensure_ascii=False), 1)
-    assert "__DIMENSIONS__" not in html and "__REVIEW_DATA__" not in html, "injection failed"
+    html = html.replace("/*__FORM_CONFIG__*/{}", json.dumps(config, ensure_ascii=False), 1)
+    assert not any(k in html for k in ("__DIMENSIONS__", "__REVIEW_DATA__", "__FORM_CONFIG__")), "injection failed"
     OUT.write_text(html)
-    print(f"Built {OUT.name}: {len(axes)} axes, {len(data)} records, {len(html)//1024} KB")
+    print(f"Built {OUT.name}: {len(axes)} axes, {len(data)} records, primary draft "
+          f"'{config['primary']}', {len(html)//1024} KB")
 
 
 if __name__ == "__main__":

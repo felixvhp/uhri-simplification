@@ -276,15 +276,16 @@ let DIMENSIONS  = [
     "group": "Accessibility: judging the draft on its own"
   }
 ];
+let FORM_CONFIG = {"primary": "summarise", "labels": {"accessible_transcribe": "Accessibility draft", "literal_transcribe": "Literal draft", "prompt_felix": "Preserve-detail draft", "simple_summary": "Plain-summary draft", "summarise": "Summary draft"}};
 let API = false;   // true when data came from the server (enables direct submit)
 let TOTAL = 0;     // records in the whole dataset (== REVIEW_DATA.length when baked)
 
-const PRIMARY = "prompt_felix";
-const VARIANT_LABELS = {
-  prompt_felix:"Preserve-detail draft", summarise:"Summary draft",
-  accessible_transcribe:"Accessibility draft", simple_summary:"Plain-summary draft",
-  literal_transcribe:"Literal draft",
-};
+// The draft under review is the first of the settings' selected_prompts;
+// labels are the prompts' names. Both arrive via FORM_CONFIG (baked or /api/config).
+let PRIMARY = "";
+let VARIANT_LABELS = {};
+function applyConfig(cfg){ PRIMARY=cfg.primary||""; VARIANT_LABELS=cfg.labels||{}; }
+function labelOf(slug){ return VARIANT_LABELS[slug]||slug; }
 const VERDICTS = [
   { v:"good", label:"Usable as first draft" },
   { v:"warn", label:"Needs edits" },
@@ -310,8 +311,9 @@ function computeWorkingSet(){
 
 function loadState(){ try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {reviewer:"",ann:{}}; } catch(e){ return {reviewer:"",ann:{}}; } }
 function persist(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch(e){} flashSaved(); }
-function annOf(id){ if(!state.ann[id]) state.ann[id]={dims:{},verdict:null,correction:null,notes:"",variant:PRIMARY}; return state.ann[id]; }
-function draftText(it){ return it.variants[PRIMARY] || it.variants[Object.keys(it.variants)[0]] || ""; }
+function annOf(id, it){ if(!state.ann[id]) state.ann[id]={dims:{},verdict:null,correction:null,notes:"",variant:it?primaryOf(it):PRIMARY}; return state.ann[id]; }
+function primaryOf(it){ return it.variants[PRIMARY]!==undefined ? PRIMARY : Object.keys(it.variants)[0]; }   // fall back if a record lacks the primary draft
+function draftText(it){ return it.variants[primaryOf(it)] || ""; }
 function firstLine(t,n){ const s=t.replace(/\s+/g," ").trim(); return s.length>n?s.slice(0,n)+"…":s; }
 function verdictClass(v){ return v==="good"?"done-good":v==="warn"?"done-warn":v==="crit"?"done-crit":""; }
 let savedTimer=null;
@@ -321,12 +323,12 @@ function escapeHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replac
 function render(){
   const realIdx = workingSet[current];
   const item = REVIEW_DATA[realIdx];
-  const a = annOf(item.id);
-  const others = Object.keys(item.variants).filter(k=>k!==PRIMARY);
+  const a = annOf(item.id, item);
+  const others = Object.keys(item.variants).filter(k=>k!==primaryOf(item));
   const othersHtml = others.length ? (
     '<details class="others"><summary>Compare the '+others.length+' other AI drafts of this record</summary>'+
     '<div class="other-grid">'+others.map(k=>
-      '<div class="other-card"><div class="name">'+escapeHtml(VARIANT_LABELS[k]||k)+'</div>'+
+      '<div class="other-card"><div class="name">'+escapeHtml(labelOf(k))+'</div>'+
       '<div class="txt">'+escapeHtml(item.variants[k])+'</div></div>').join("")+
     '</div></details>'
   ) : "";
@@ -353,7 +355,7 @@ function render(){
     '<div class="compare">'+
       '<section class="panel orig"><div class="panel-head">Original text<span class="tag">UN source</span></div>'+
         '<div class="doc">'+escapeHtml(item.original)+'</div></section>'+
-      '<section class="panel draft"><div class="panel-head">AI plain-English draft<span class="tag">'+escapeHtml(VARIANT_LABELS[PRIMARY])+'</span></div>'+
+      '<section class="panel draft"><div class="panel-head">AI plain-English draft<span class="tag">'+escapeHtml(labelOf(primaryOf(item)))+'</span></div>'+
         '<div class="doc">'+escapeHtml(draftText(item))+'</div></section>'+
     '</div>'+
 
@@ -465,7 +467,7 @@ function buildRecords(){
     const human={};
     DIMENSIONS.forEach(d=>{ const v=a.dims&&a.dims[d.key]; human["human_"+d.key]= v==="ok"?1 : v==="bad"?0 : ""; });
     const corr=(a.correction!==null&&a.correction!==undefined)?a.correction:"";
-    out.push(Object.assign({ record_index:item.id+1, reviewed_variant:a.variant||PRIMARY, verdict:a.verdict||"" }, human, {
+    out.push(Object.assign({ record_index:item.id+1, reviewed_variant:a.variant||primaryOf(item), verdict:a.verdict||"" }, human, {
       correction_changed: corr!=="" && corr!==draftText(item),
       suggested_correction:corr, notes:a.notes||"", original:item.original, ai_draft:draftText(item),
     }));
@@ -559,11 +561,12 @@ async function fetchRecords(){
 async function boot(){
   if(!REVIEW_DATA.length || !DIMENSIONS.length){
     try {
-      const [axes] = await Promise.all([
+      const [axes, cfg] = await Promise.all([
         fetch("/api/axes").then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+        fetch("/api/config").then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
         fetchRecords(),
       ]);
-      DIMENSIONS=axes; API=true;
+      DIMENSIONS=axes; applyConfig(cfg); API=true;
     } catch(e){
       document.getElementById("wrap").innerHTML=
         '<div class="panel" style="padding:20px 24px"><strong>Could not load review data.</strong>'+
@@ -572,7 +575,7 @@ async function boot(){
       return;
     }
   } else {
-    TOTAL=REVIEW_DATA.length;
+    TOTAL=REVIEW_DATA.length; applyConfig(FORM_CONFIG);
   }
   init();
 }

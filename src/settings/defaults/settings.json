@@ -1,5 +1,5 @@
 {
-  "selected_prompts": ["prompt_felix"],
+  "selected_prompts": ["summarise"],
   "simplification": {
     "model": "gpt-5.5",
     "reasoning_effort": "medium",
