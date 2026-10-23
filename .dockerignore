@@ -1,0 +1,13 @@
+# Only src/ is copied into the image; keep secrets, data and caches out of the build context.
+.env
+*.env
+.git
+data/
+venv/
+venv311/
+tests/
+docs/
+**/__pycache__/
+.pytest_cache/
+src/feedback_form/exports/
+src/settings/user/

@@ -153,16 +153,17 @@
   .overlay.show { display:flex; }
   .modal { background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);
     width:min(720px,100%); max-height:86vh; display:flex; flex-direction:column; overflow:hidden; }
-  .modal-head { padding:18px 22px; border-bottom:1px solid var(--line); }
+  .modal-head { padding:18px 48px 18px 22px; border-bottom:1px solid var(--line); position:relative; }
+  .modal-close { position:absolute; top:12px; right:12px; width:32px; height:32px; border:0; border-radius:8px; background:transparent;
+    color:var(--ink2); font-size:22px; line-height:1; cursor:pointer; }
+  .modal-close:hover { background:var(--panel2); color:var(--ink); }
   .modal-head h2 { font-size:16px; font-weight:650; }
   .modal-head p { font-size:12.5px; color:var(--ink2); margin:5px 0 0; }
   .modal-body { padding:16px 22px; overflow-y:auto; }
-  .tabs { display:inline-flex; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:3px; margin-bottom:12px; }
-  .tabs button { border:0; background:transparent; color:var(--ink2); font-size:12.5px; font-weight:600; padding:6px 14px; border-radius:6px; }
-  .tabs button.on { background:var(--accent); color:#fff; box-shadow:var(--shadow); }
+  .modal-body .summary { font-size:14px; margin:0 0 4px; }
+  .modal-body .summary strong { font-weight:650; }
   .modal-body textarea { min-height:240px; font-family:var(--mono); font-size:11.5px; white-space:pre; overflow-wrap:normal; }
   .modal-foot { display:flex; gap:10px; padding:15px 22px; border-top:1px solid var(--line); }
-  .modal-foot .spacer { margin-left:auto; }
 
   @media (max-width:720px){
     .hdr { flex-wrap:wrap; }
@@ -192,31 +193,30 @@
     <div class="modal-head">
       <h2 id="modal-title">Export feedback</h2>
       <p id="export-note">Copy the text below (or download the file) and send it back to the team. It holds every review recorded on this device. No names or personal data are collected.</p>
+      <button class="modal-close" id="close-modal" aria-label="Close" title="Close">&times;</button>
     </div>
     <div class="modal-body">
-      <div class="tabs">
-        <button data-fmt="json" class="on">JSON</button>
-        <button data-fmt="csv">CSV (spreadsheet)</button>
-      </div>
+      <p class="summary" id="export-summary"></p>
       <textarea id="export-text" readonly spellcheck="false"></textarea>
     </div>
     <div class="modal-foot">
       <button class="go" id="submit-btn" hidden>Submit to team</button>
       <button class="nav" id="copy-btn">Copy to clipboard</button>
       <button class="nav" id="download-btn">Download file</button>
-      <span class="spacer"></span>
-      <button class="go" id="close-modal">Done</button>
     </div>
   </div>
 </div>
 
 <script>
-// Baked by build_review_tool.py for the standalone file. When served raw by
-// serve_review.py these stay empty and boot() fetches both from its API
-// instead — same page, two delivery modes.
+// Baked by build.py for the standalone file. When served raw by serve.py these
+// stay empty and boot() fetches both from its API instead — same page, two
+// delivery modes. Sampling differs: the baked page holds every record and
+// draws the reviewer's subset here; the served page receives only its subset
+// (GET /api/records?n=&seed=), so the dataset can be arbitrarily large.
 let REVIEW_DATA = /*__REVIEW_DATA__*/[];
 let DIMENSIONS  = /*__DIMENSIONS__*/[];
 let API = false;   // true when data came from the server (enables direct submit)
+let TOTAL = 0;     // records in the whole dataset (== REVIEW_DATA.length when baked)
 
 const PRIMARY = "prompt_felix";
 const VARIANT_LABELS = {
@@ -236,11 +236,11 @@ let workingSet = [];   // indices into REVIEW_DATA assigned to this reviewer
 
 function strHash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
-function sampleSize(){ const M=REVIEW_DATA.length, n=state.sampleN; return (!n||n<1||n>=M)?M:n; }
+function sampleSize(){ if(API) return REVIEW_DATA.length; const M=TOTAL, n=state.sampleN; return (!n||n<1||n>=M)?M:n; }
 function deviceSeed(){ if(!state.deviceSeed){ state.deviceSeed=(Math.floor(Math.random()*4294967296))>>>0; persist(); } return state.deviceSeed; }
 function computeWorkingSet(){
-  const M=REVIEW_DATA.length, N=sampleSize();
-  if(N>=M){ workingSet=REVIEW_DATA.map((_,i)=>i); return; }
+  const M=TOTAL, N=sampleSize();
+  if(API || N>=M){ workingSet=REVIEW_DATA.map((_,i)=>i); return; }   // served: already sampled
   const idx=REVIEW_DATA.map((_,i)=>i);
   const rng=mulberry32(deviceSeed());   // anonymous per-device seed; no name collected
   for(let i=idx.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); const tmp=idx[i]; idx[i]=idx[j]; idx[j]=tmp; }
@@ -270,7 +270,7 @@ function render(){
     '</div></details>'
   ) : "";
 
-  const M=REVIEW_DATA.length, N=sampleSize(), sampling=N<M;
+  const M=TOTAL, N=sampleSize(), sampling=N<M;
   document.getElementById("wrap").innerHTML =
     '<div class="assign panel">'+
       '<span class="lbl">Your review set</span>'+
@@ -281,7 +281,7 @@ function render(){
     '</div>'+
     '<div class="pager panel">'+
       '<button class="nav" id="prev">← Prev</button>'+
-      '<span class="reclabel">Record '+(realIdx+1)+' <span style="color:var(--muted);font-weight:400">· '+(current+1)+' / '+workingSet.length+' in your set</span></span>'+
+      '<span class="reclabel">Record '+(item.id+1)+' <span style="color:var(--muted);font-weight:400">· '+(current+1)+' / '+workingSet.length+' in your set</span></span>'+
       '<div class="dots" id="dots"></div>'+
       '<span class="prog"><span id="progress-text"></span><span class="track"><span class="fill" id="fill"></span></span></span>'+
       '<button class="nav" id="next">Next →</button>'+
@@ -336,7 +336,12 @@ function render(){
   document.getElementById("next").disabled = current===workingSet.length-1;
   document.getElementById("next2").disabled = current===workingSet.length-1;
   const sn=document.getElementById("sampleN");
-  if(sn) sn.onchange=()=>{ let v=parseInt(sn.value,10); const Mx=REVIEW_DATA.length; if(isNaN(v)||v<1) v=Mx; if(v>Mx) v=Mx; state.sampleN=(v>=Mx)?null:v; persist(); computeWorkingSet(); current=0; render(); window.scrollTo(0,0); };
+  if(sn) sn.onchange=async()=>{
+    let v=parseInt(sn.value,10); const Mx=TOTAL; if(isNaN(v)||v<1) v=Mx; if(v>Mx) v=Mx;
+    state.sampleN=(v>=Mx)?null:v; persist();
+    if(API){ try { await fetchRecords(); } catch(e){ setBtn("next","Reload failed"); return; } }
+    computeWorkingSet(); current=0; render(); window.scrollTo(0,0);
+  };
 }
 
 function renderDots(){
@@ -346,7 +351,7 @@ function renderDots(){
     const a=state.ann[it.id];
     const b=document.createElement("button");
     b.className="dot "+(pos===current?"here ":"")+(a&&a.verdict?verdictClass(a.verdict):"");
-    b.title="Record "+(realIdx+1);
+    b.title="Record "+(it.id+1);
     b.onclick=()=>{ current=pos; render(); window.scrollTo(0,0); };
     wrap.appendChild(b);
   });
@@ -399,7 +404,7 @@ function buildRecords(){
     const human={};
     DIMENSIONS.forEach(d=>{ const v=a.dims&&a.dims[d.key]; human["human_"+d.key]= v==="ok"?1 : v==="bad"?0 : ""; });
     const corr=(a.correction!==null&&a.correction!==undefined)?a.correction:"";
-    out.push(Object.assign({ record_index:i+1, reviewed_variant:a.variant||PRIMARY, verdict:a.verdict||"" }, human, {
+    out.push(Object.assign({ record_index:item.id+1, reviewed_variant:a.variant||PRIMARY, verdict:a.verdict||"" }, human, {
       correction_changed: corr!=="" && corr!==draftText(item),
       suggested_correction:corr, notes:a.notes||"", original:item.original, ai_draft:draftText(item),
     }));
@@ -407,43 +412,46 @@ function buildRecords(){
   return out;
 }
 function buildJSON(){
-  const N=sampleSize(), M=REVIEW_DATA.length;
+  const N=sampleSize(), M=TOTAL;
   return JSON.stringify({
     sample_size: N>=M ? "all" : N,
-    assigned_records: workingSet.map(i=>i+1),
+    total_records: M,
+    assigned_records: workingSet.map(i=>REVIEW_DATA[i].id+1),
     records: buildRecords(),
   }, null, 2);
 }
-function csvCell(v){ const s=String(v==null?"":v); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
-function buildCSV(){
-  const rows=buildRecords();
-  const humanCols=DIMENSIONS.map(d=>"human_"+d.key);
-  const cols=["record_index","reviewed_variant","verdict",...humanCols,"correction_changed","suggested_correction","notes","original","ai_draft"];
-  const lines=[cols.join(",")];
-  rows.forEach(r=>{ lines.push(cols.map(c=>csvCell(r[c])).join(",")); });
-  return lines.join("\n");
+function refreshExport(){
+  const done=buildRecords().length, tot=workingSet.length;
+  document.getElementById("export-summary").innerHTML =
+    '<strong>'+done+'</strong> of '+tot+' records in your set '+(done===1?'has':'have')+' feedback so far.';
+  document.getElementById("export-text").value = buildJSON();
 }
-let exportFmt="json";
-function refreshExportText(){ document.getElementById("export-text").value = exportFmt==="json"?buildJSON():buildCSV(); }
-function openExport(){ refreshExportText(); document.getElementById("overlay").classList.add("show"); }
+function openExport(){ refreshExport(); document.getElementById("overlay").classList.add("show"); }
 function closeExport(){ document.getElementById("overlay").classList.remove("show"); }
 
 function setBtn(id,txt){ const b=document.getElementById(id); const old=b.textContent; b.textContent=txt; setTimeout(()=>{b.textContent=old;},1400); }
 
+// Served page: one button, Submit. Standalone page: no server, so the reviewer
+// copies or downloads the JSON and sends it back by hand.
 function wireSubmit(){
   const btn=document.getElementById("submit-btn");
   if(!API){ btn.hidden=true; return; }
   btn.hidden=false;
+  document.getElementById("export-btn").textContent="Submit feedback";
+  document.getElementById("modal-title").textContent="Submit feedback";
   document.getElementById("export-note").textContent=
-    "Click Submit to send your review straight to the team, or copy/download it below. "+
-    "It holds every review recorded on this device. No names or personal data are collected.";
+    "Sends every review recorded on this device to the team. You can submit again later; the latest submission counts. "+
+    "No names or personal data are collected.";
+  document.getElementById("export-text").hidden=true;
+  document.getElementById("copy-btn").hidden=true;
+  document.getElementById("download-btn").hidden=true;
   btn.onclick=async()=>{
     btn.disabled=true;
     try {
       const r=await fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:buildJSON()});
       if(!r.ok) throw new Error("HTTP "+r.status);
       setBtn("submit-btn","Submitted ✓");
-    } catch(e){ setBtn("submit-btn","Failed — use copy/download"); }
+    } catch(e){ setBtn("submit-btn","Failed — please try again"); }
     btn.disabled=false;
   };
 }
@@ -453,19 +461,15 @@ function init(){
   document.getElementById("export-btn").onclick=openExport;
   document.getElementById("close-modal").onclick=closeExport;
   document.getElementById("overlay").onclick=(e)=>{ if(e.target.id==="overlay") closeExport(); };
-  document.querySelectorAll(".tabs button").forEach(b=>{
-    b.onclick=()=>{ document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); exportFmt=b.getAttribute("data-fmt"); refreshExportText(); };
-  });
   document.getElementById("copy-btn").onclick=()=>{
     const ta=document.getElementById("export-text"); ta.select();
     try { navigator.clipboard.writeText(ta.value).then(()=>setBtn("copy-btn","Copied ✓"),()=>{document.execCommand("copy");setBtn("copy-btn","Copied ✓");}); }
     catch(e){ try{document.execCommand("copy");setBtn("copy-btn","Copied ✓");}catch(e2){setBtn("copy-btn","Select the text & copy");} }
   };
   document.getElementById("download-btn").onclick=()=>{
-    const isJson=exportFmt==="json";
-    const blob=new Blob([isJson?buildJSON():buildCSV()],{type:isJson?"application/json":"text/csv"});
+    const blob=new Blob([buildJSON()],{type:"application/json"});
     try { const url=URL.createObjectURL(blob); const link=document.createElement("a");
-      link.href=url; link.download="translation_review."+(isJson?"json":"csv");
+      link.href=url; link.download="translation_review.json";
       document.body.appendChild(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1500);
     } catch(e){ setBtn("download-btn","Use copy instead"); }
   };
@@ -480,21 +484,34 @@ function init(){
   render();
 }
 
+// Served mode: ask the server for this device's sample. Same seed + same size
+// => same records on every reload, so saved reviews line up with what is shown.
+async function fetchRecords(){
+  const q=new URLSearchParams({seed:String(deviceSeed())});
+  if(state.sampleN) q.set("n",String(state.sampleN));
+  const r=await fetch("/api/records?"+q.toString()); if(!r.ok) throw new Error(r.status);
+  const d=await r.json();
+  REVIEW_DATA=d.records; TOTAL=d.total;
+  if(state.sampleN && state.sampleN!==d.sample_size && d.sample_size<d.total){ state.sampleN=d.sample_size; persist(); }   // server capped it
+}
+
 async function boot(){
   if(!REVIEW_DATA.length || !DIMENSIONS.length){
     try {
-      const [axes, records] = await Promise.all([
+      const [axes] = await Promise.all([
         fetch("/api/axes").then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
-        fetch("/api/records").then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+        fetchRecords(),
       ]);
-      DIMENSIONS=axes; REVIEW_DATA=records; API=true;
+      DIMENSIONS=axes; API=true;
     } catch(e){
       document.getElementById("wrap").innerHTML=
         '<div class="panel" style="padding:20px 24px"><strong>Could not load review data.</strong>'+
         '<p class="hint">This page was opened without baked-in data and its server API is unreachable. '+
-        'Either open the built translation_review.html, or serve this page with review/serve_review.py.</p></div>';
+        'Either open the built translation_review.html, or serve this page with python -m src.feedback_form.serve.</p></div>';
       return;
     }
+  } else {
+    TOTAL=REVIEW_DATA.length;
   }
   init();
 }

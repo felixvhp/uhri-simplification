@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
 Pkg 3: Build the Plain-English Translation Review tool (feedback form)
-[last updated 2026-10-02]
+[last updated 2026-10-23]
 
 Injects two things into review_template.html:
-  * REVIEW_DATA : the original + AI-draft pairs (from review_data.json)
+  * REVIEW_DATA : the original + AI-draft pairs (all of review_data.jsonl;
+                   the baked page samples client-side, so keep it to a few
+                   hundred records — the served page scales, this one does not)
   * DIMENSIONS : the active metrics of the shared settings (src/settings,
                    metrics.json) — the same set the dashboard's LLM judge
                    scores, so the human review axes can never drift from it.
@@ -14,8 +16,8 @@ Usage:
     python -m src.feedback_form.build        (from the repo root)
 Writes src/feedback_form/translation_review.html (self-contained, opens in any browser).
 
-To repoint at a different dataset, regenerate review_data.json with
-make_data.py (a list of {id, original, variants:{<prompt>: <text>}}) and rerun.
+To repoint at a different dataset, regenerate review_data.jsonl with
+make_data.py (one {id, original, variants:{<prompt>: <text>}} per line) and rerun.
 
 Resumption:
     A metric's reviewer-facing label is its "name" in metrics.json and its
@@ -26,10 +28,11 @@ import json
 from pathlib import Path
 
 from ..settings import load_metrics
+from .records import RecordStore
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE / "review_template.html"
-DATA = HERE / "review_data.json"
+DATA = HERE / "review_data.jsonl"
 OUT = HERE / "translation_review.html"
 
 # Accessibility metrics are judged on the draft alone; fidelity ones against the original.
@@ -66,7 +69,7 @@ def build_axes() -> list[dict]:
 
 def main() -> None:
     axes = build_axes()
-    data = json.loads(DATA.read_text())
+    data = RecordStore(DATA).all()
     html = TEMPLATE.read_text()
     html = html.replace("/*__DIMENSIONS__*/[]", json.dumps(axes, ensure_ascii=False, indent=2), 1)
     html = html.replace("/*__REVIEW_DATA__*/[]", json.dumps(data, ensure_ascii=False), 1)

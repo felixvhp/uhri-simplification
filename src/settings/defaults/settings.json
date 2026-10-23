@@ -24,6 +24,8 @@
   "feedback_form": {
     "data_path": "data/cleaned.csv",
     "host": "127.0.0.1",
-    "port": 8010
+    "port": 8010,
+    "sample_size": 50,
+    "max_sample_size": 500
   }
 }

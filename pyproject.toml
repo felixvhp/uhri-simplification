@@ -36,7 +36,7 @@ uhri_simplification = "src"
 
 [tool.setuptools.package-data]
 "uhri_simplification.settings" = ["defaults/*.json"]
-"uhri_simplification.feedback_form" = ["*.html", "*.json"]
+"uhri_simplification.feedback_form" = ["*.html", "*.json", "*.jsonl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
