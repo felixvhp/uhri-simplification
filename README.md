@@ -4,6 +4,29 @@ Turns the legal language of UN human rights recommendations (OHCHR's Universal
 Human Rights Index) into plain English, and provides two tools to check how
 good the result is.
 
+## About this repository
+
+Part of the Accessible UN Human Rights Index project, an ETH Zurich student team
+project built in collaboration with the UN Human Rights Office (OHCHR) to make the
+recommendations in the Universal Human Rights Index readable for non-experts. This
+repository is the simplification and evaluation half of the system:
+
+- an LLM pipeline that rewrites recommendations into plain English under several
+  competing prompt strategies;
+- an LLM-as-judge that scores every draft on nine fidelity and accessibility
+  dimensions, with a Streamlit dashboard for comparing prompts;
+- an expert review form, deployable as a static page or on Google Cloud Run, where
+  reviewers answer the same questions as the judge, plus a calibration module that
+  reports human-versus-judge agreement per dimension.
+
+The retrieval engine and search front end live in a separate repository.
+
+Contributors: Hong Phuc Vu, Dani Vuijk, Jason Zhan, Paul Ellsiepen (see the commit
+history). This public copy mirrors the team repository with its full history. No
+OHCHR data is included: the sample records in `src/feedback_form/review_data.jsonl`
+are public UN recommendations with model-generated rewrites, and reviewer
+submissions are never committed.
+
 ## Repository structure
 
 ```
@@ -150,15 +173,15 @@ and run `python -m src.feedback_form.calibration` as usual.
 
 To change the dataset, rerun `make_data` and `gcloud run deploy` again.
 
-**Dedicated service accounts.** The project `uhri2-510415` uses one account to
+**Dedicated service accounts.** The project uses one account to
 build and another to run (least privilege), so the real deploy names both:
 
 ```bash
 gcloud run deploy uhri-feedback --source . --region europe-west6 \
-  --build-service-account projects/uhri2-510415/serviceAccounts/uhri2-feedback-build@uhri2-510415.iam.gserviceaccount.com \
-  --service-account uhri2-feedback-run@uhri2-510415.iam.gserviceaccount.com \
+  --build-service-account projects/YOUR_PROJECT_ID/serviceAccounts/BUILD_SA@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+  --service-account RUN_SA@YOUR_PROJECT_ID.iam.gserviceaccount.com \
   --execution-environment gen2 \
-  --add-volume name=reviews,type=cloud-storage,bucket=uhri2-feedback-reviews \
+  --add-volume name=reviews,type=cloud-storage,bucket=YOUR_BUCKET \
   --add-volume-mount volume=reviews,mount-path=/data \
   --allow-unauthenticated
 ```
